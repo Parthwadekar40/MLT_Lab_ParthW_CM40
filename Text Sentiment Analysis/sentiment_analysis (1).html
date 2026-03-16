@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SentimentAI — Text Emotion Classifier</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: #2a2a3d;
+    --pos: #00e5a0;
+    --neg: #ff4f6d;
+    --neu: #7b8cde;
+    --text: #e8e8f0;
+    --muted: #6b6b8a;
+    --glow-pos: rgba(0, 229, 160, 0.15);
+    --glow-neg: rgba(255, 79, 109, 0.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px 80px;
+    overflow-x: hidden;
+  }
+
+  /* Animated background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 60% 40% at 20% 20%, rgba(0,229,160,0.04) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 50% at 80% 80%, rgba(255,79,109,0.04) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 60% at 50% 50%, rgba(123,140,222,0.03) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 760px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Header */
+  .header {
+    text-align: center;
+    margin-bottom: 52px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    margin-bottom: 20px;
+    text-transform: uppercase;
+  }
+
+  .badge-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--pos);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.7); }
+  }
+
+  h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(2.4rem, 6vw, 3.8rem);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 14px;
+  }
+
+  h1 em {
+    font-style: italic;
+    color: var(--neu);
+  }
+
+  .subtitle {
+    font-size: 15px;
+    color: var(--muted);
+    font-weight: 300;
+    line-height: 1.6;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+
+  /* Main card */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 32px;
+    margin-bottom: 24px;
+    transition: border-color 0.4s ease;
+  }
+
+  .card.pos-glow { border-color: rgba(0,229,160,0.4); box-shadow: 0 0 40px var(--glow-pos); }
+  .card.neg-glow { border-color: rgba(255,79,109,0.4); box-shadow: 0 0 40px var(--glow-neg); }
+
+  .textarea-wrap {
+    position: relative;
+    margin-bottom: 20px;
+  }
+
+  textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    resize: vertical;
+    min-height: 140px;
+    outline: none;
+    transition: border-color 0.3s, box-shadow 0.3s;
+    caret-color: var(--pos);
+  }
+
+  textarea::placeholder { color: var(--muted); }
+
+  textarea:focus {
+    border-color: var(--neu);
+    box-shadow: 0 0 0 3px rgba(123,140,222,0.1);
+  }
+
+  .char-count {
+    position: absolute;
+    bottom: 10px;
+    right: 14px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* Analyze button */
+  .btn-analyze {
+    width: 100%;
+    padding: 16px 24px;
+    background: linear-gradient(135deg, #1e3a2f, #1a2a1e);
+    border: 1px solid rgba(0,229,160,0.3);
+    border-radius: 12px;
+    color: var(--pos);
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .btn-analyze:hover:not(:disabled) {
+    background: linear-gradient(135deg, #243d31, #1f3024);
+    border-color: rgba(0,229,160,0.6);
+    box-shadow: 0 4px 24px rgba(0,229,160,0.15);
+    transform: translateY(-1px);
+  }
+
+  .btn-analyze:active:not(:disabled) { transform: translateY(0); }
+
+  .btn-analyze:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Loading spinner */
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(0,229,160,0.3);
+    border-top-color: var(--pos);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Result */
+  .result-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 32px;
+    opacity: 0;
+    transform: translateY(16px);
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+  }
+
+  .result-card.visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: all;
+  }
+
+  .result-label {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  .sentiment-icon {
+    width: 56px; height: 56px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    flex-shrink: 0;
+  }
+
+  .sentiment-icon.positive { background: rgba(0,229,160,0.12); }
+  .sentiment-icon.negative { background: rgba(255,79,109,0.12); }
+
+  .sentiment-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .sentiment-title.positive { color: var(--pos); }
+  .sentiment-title.negative { color: var(--neg); }
+
+  .sentiment-sub {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 4px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.05em;
+  }
+
+  /* Confidence bar */
+  .confidence-section { margin-bottom: 28px; }
+
+  .conf-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .conf-value {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .bar-track {
+    height: 8px;
+    background: var(--surface2);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: 99px;
+    width: 0%;
+    transition: width 1s cubic-bezier(0.16, 1, 0.3, 1) 0.2s;
+  }
+
+  .bar-fill.positive { background: linear-gradient(90deg, #00b87a, var(--pos)); }
+  .bar-fill.negative { background: linear-gradient(90deg, #cc1a3a, var(--neg)); }
+
+  /* Dual meter */
+  .dual-meter {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .meter-item {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+
+  .meter-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  .meter-value {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.8rem;
+    font-weight: 700;
+  }
+
+  .meter-value.pos-val { color: var(--pos); }
+  .meter-value.neg-val { color: var(--neg); }
+
+  /* Keywords */
+  .keywords-section {}
+
+  .section-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .keyword-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .chip {
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-family: 'DM Mono', monospace;
+    border: 1px solid;
+    animation: chipIn 0.3s ease both;
+  }
+
+  @keyframes chipIn {
+    from { opacity: 0; transform: scale(0.85); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  .chip.pos { color: var(--pos); border-color: rgba(0,229,160,0.25); background: rgba(0,229,160,0.06); }
+  .chip.neg { color: var(--neg); border-color: rgba(255,79,109,0.25); background: rgba(255,79,109,0.06); }
+  .chip.neu { color: var(--neu); border-color: rgba(123,140,222,0.25); background: rgba(123,140,222,0.06); }
+
+  /* Sample texts */
+  .samples {
+    margin-top: 24px;
+  }
+
+  .samples-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .sample-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .sample-chip {
+    padding: 7px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  .sample-chip:hover {
+    border-color: var(--neu);
+    color: var(--text);
+    background: rgba(123,140,222,0.08);
+  }
+
+  /* Status bar */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    padding: 10px 16px;
+    background: var(--surface2);
+    border-radius: 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .status-dot.ready { background: var(--pos); animation: pulse 2s infinite; }
+  .status-dot.loading { background: var(--neu); animation: pulse 0.5s infinite; }
+  .status-dot.error { background: var(--neg); }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    margin-top: 40px;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.05em;
+  }
+
+  @media (max-width: 520px) {
+    .card, .result-card { padding: 22px 18px; }
+    .dual-meter { grid-template-columns: 1fr 1fr; gap: 8px; }
+    h1 { font-size: 2rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Header -->
+  <div class="header">
+    <div class="badge"><span class="badge-dot"></span>TensorFlow.js · RNN Model</div>
+    <h1>Text <em>Sentiment</em><br>Analysis</h1>
+    <p class="subtitle">Classify text as positive or negative using a pre-trained RNN sentiment model, running entirely in your browser.</p>
+  </div>
+
+  <!-- Input Card -->
+  <div class="card" id="inputCard">
+    <div class="textarea-wrap">
+      <textarea id="inputText" placeholder="Type or paste text to analyse its emotional tone..." maxlength="1000"></textarea>
+      <span class="char-count" id="charCount">0 / 1000</span>
+    </div>
+
+    <button class="btn-analyze" id="analyzeBtn" onclick="analyse()" disabled>
+      <span class="spinner" id="btnSpinner" style="display:none"></span>
+      <span id="btnText">Loading Model…</span>
+    </button>
+
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Initialising TensorFlow.js and loading sentiment model…</span>
+    </div>
+
+    <div class="samples">
+      <div class="samples-title">Try a sample</div>
+      <div class="sample-chips" id="sampleChips"></div>
+    </div>
+  </div>
+
+  <!-- Result Card -->
+  <div class="result-card" id="resultCard">
+    <div class="result-label">
+      <div class="sentiment-icon" id="sentIcon"></div>
+      <div>
+        <div class="sentiment-title" id="sentTitle">—</div>
+        <div class="sentiment-sub" id="sentSub">—</div>
+      </div>
+    </div>
+
+    <div class="confidence-section">
+      <div class="conf-header">
+        <span>Confidence</span>
+        <span class="conf-value" id="confValue">—</span>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill" id="confBar"></div>
+      </div>
+    </div>
+
+    <div class="dual-meter">
+      <div class="meter-item">
+        <div class="meter-label">Positive Score</div>
+        <div class="meter-value pos-val" id="posScore">—</div>
+      </div>
+      <div class="meter-item">
+        <div class="meter-label">Negative Score</div>
+        <div class="meter-value neg-val" id="negScore">—</div>
+      </div>
+    </div>
+
+    <div class="keywords-section">
+      <div class="section-title">Detected Signals</div>
+      <div class="keyword-chips" id="keywordChips"></div>
+    </div>
+  </div>
+
+  <footer>sentiment-ai · running locally in browser · no data sent to server</footer>
+</div>
+
+<script>
+// ─── Sentiment word dictionaries ──────────────────────────────────────────
+const POSITIVE_WORDS = [
+  'amazing','awesome','beautiful','best','brilliant','calm','cheerful','clean',
+  'clear','comfortable','confident','cool','cute','delightful','easy','enjoy',
+  'excellent','excited','fantastic','fast','fine','fun','good','great','happy',
+  'helpful','hope','incredible','inspiring','joy','kind','laugh','love','lovely',
+  'lucky','magnificent','nice','outstanding','perfect','pleased','positive',
+  'powerful','praised','pretty','refreshing','reliable','remarkable','smooth',
+  'spectacular','splendid','strong','successful','super','superb','terrific',
+  'thankful','thrilled','top','trust','wonderful','wow','smart','brilliant'
+];
+
+const NEGATIVE_WORDS = [
+  'awful','bad','boring','broken','confused','corrupt','cruel','damage','dark',
+  'dead','difficult','disappoint','disgusting','dreadful','dull','evil','fail',
+  'fake','fear','frustrated','hate','horrible','hurt','inferior','lazy','lie',
+  'miserable','nasty','negative','never','nightmare','no','noisy','offensive',
+  'painful','poor','problem','rough','rude','sad','scary','serious','slow',
+  'stupid','terrible','toxic','ugly','unpleasant','upset','useless','waste',
+  'weak','worst','wrong','worthless','disaster','tragic','horrific','corrupt'
+];
+
+// ─── Samples ──────────────────────────────────────────────────────────────
+const SAMPLES = [
+  "I absolutely love this product! It's amazing and works perfectly.",
+  "This is the worst experience I've ever had. Totally disappointed.",
+  "The movie was incredibly boring and a waste of my time.",
+  "What a fantastic day! Everything went smoothly and I feel great.",
+  "The service was terrible and the staff were rude and unhelpful.",
+  "I'm so happy with the results. Truly outstanding work!",
+];
+
+// ─── Globals ──────────────────────────────────────────────────────────────
+let model = null;
+let metadata = null;
+
+const PAD_INDEX = 0;
+const OOV_INDEX = 2;
+const INDEX_FROM = 3;
+
+// ─── Render samples ───────────────────────────────────────────────────────
+function renderSamples() {
+  const wrap = document.getElementById('sampleChips');
+  SAMPLES.forEach(s => {
+    const el = document.createElement('button');
+    el.className = 'sample-chip';
+    el.textContent = s.length > 42 ? s.slice(0, 42) + '…' : s;
+    el.title = s;
+    el.onclick = () => {
+      document.getElementById('inputText').value = s;
+      updateCharCount();
+    };
+    wrap.appendChild(el);
+  });
+}
+
+// ─── Char counter ─────────────────────────────────────────────────────────
+function updateCharCount() {
+  const len = document.getElementById('inputText').value.length;
+  document.getElementById('charCount').textContent = `${len} / 1000`;
+}
+document.getElementById('inputText').addEventListener('input', updateCharCount);
+
+// ─── Status helpers ───────────────────────────────────────────────────────
+function setStatus(msg, type = 'loading') {
+  document.getElementById('statusText').textContent = msg;
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot ' + type;
+}
+
+// ─── Load model ───────────────────────────────────────────────────────────
+async function loadModel() {
+  try {
+    setStatus('Loading TensorFlow.js model…', 'loading');
+    const MODEL_URL = 'https://storage.googleapis.com/tfjs-models/tfjs/sentiment_cnn_v1/model.json';
+    const META_URL  = 'https://storage.googleapis.com/tfjs-models/tfjs/sentiment_cnn_v1/metadata.json';
+
+    const [m, meta] = await Promise.all([
+      tf.loadLayersModel(MODEL_URL),
+      fetch(META_URL).then(r => r.json())
+    ]);
+
+    model = m;
+    metadata = meta;
+
+    setStatus('Model ready — enter text to classify', 'ready');
+    const btn = document.getElementById('analyzeBtn');
+    btn.disabled = false;
+    document.getElementById('btnText').textContent = '⟶  Analyse Sentiment';
+  } catch (e) {
+    console.warn('TF model load failed, using dictionary fallback:', e);
+    setStatus('Using offline dictionary model (no network)', 'ready');
+    model = 'dictionary';
+    const btn = document.getElementById('analyzeBtn');
+    btn.disabled = false;
+    document.getElementById('btnText').textContent = '⟶  Analyse Sentiment';
+  }
+}
+
+// ─── Preprocess for TF model ──────────────────────────────────────────────
+function padSequences(sequences, maxLen) {
+  return sequences.map(seq => {
+    if (seq.length >= maxLen) return seq.slice(seq.length - maxLen);
+    const pad = new Array(maxLen - seq.length).fill(PAD_INDEX);
+    return pad.concat(seq);
+  });
+}
+
+function tokenize(text) {
+  const words = text.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').trim().split(/\s+/);
+  return words.map(w => {
+    const idx = metadata.word_index[w];
+    return idx === undefined ? OOV_INDEX : idx + INDEX_FROM;
+  });
+}
+
+// ─── Dictionary fallback ──────────────────────────────────────────────────
+function dictionaryScore(text) {
+  const words = text.toLowerCase().split(/\s+/);
+  let pos = 0, neg = 0;
+  words.forEach(w => {
+    const clean = w.replace(/[^a-z]/g, '');
+    if (POSITIVE_WORDS.includes(clean)) pos++;
+    if (NEGATIVE_WORDS.includes(clean)) neg++;
+  });
+  const total = pos + neg || 1;
+  return pos / total;  // 0–1, >0.5 = positive
+}
+
+// ─── Extract keyword signals ──────────────────────────────────────────────
+function extractSignals(text, sentiment) {
+  const words = text.toLowerCase().split(/\s+/).map(w => w.replace(/[^a-z]/g, '')).filter(Boolean);
+  const chips = [];
+  words.forEach(w => {
+    if (POSITIVE_WORDS.includes(w)) chips.push({ word: w, type: 'pos' });
+    else if (NEGATIVE_WORDS.includes(w)) chips.push({ word: w, type: 'neg' });
+  });
+  // dedupe
+  const seen = new Set();
+  return chips.filter(c => { if (seen.has(c.word)) return false; seen.add(c.word); return true; }).slice(0, 10);
+}
+
+// ─── Analyse ──────────────────────────────────────────────────────────────
+async function analyse() {
+  const text = document.getElementById('inputText').value.trim();
+  if (!text) { alert('Please enter some text first.'); return; }
+
+  const btn = document.getElementById('analyzeBtn');
+  btn.disabled = true;
+  document.getElementById('btnSpinner').style.display = 'flex';
+  document.getElementById('btnText').textContent = 'Analysing…';
+
+  let score;
+
+  try {
+    if (model === 'dictionary') {
+      await new Promise(r => setTimeout(r, 400)); // simulate
+      score = dictionaryScore(text);
+    } else {
+      const tokens = tokenize(text);
+      const padded = padSequences([tokens], metadata.max_len);
+      const tensor = tf.tensor2d(padded, [1, metadata.max_len], 'int32');
+      const prediction = model.predict(tensor);
+      const raw = (await prediction.data())[0];
+      tensor.dispose(); prediction.dispose();
+      score = raw;
+    }
+  } catch (e) {
+    score = dictionaryScore(text);
+  }
+
+  renderResult(text, score);
+
+  btn.disabled = false;
+  document.getElementById('btnSpinner').style.display = 'none';
+  document.getElementById('btnText').textContent = '⟶  Analyse Sentiment';
+}
+
+// ─── Render result ────────────────────────────────────────────────────────
+function renderResult(text, score) {
+  const isPositive = score >= 0.5;
+  const confidence = isPositive ? score : (1 - score);
+  const pct = Math.round(confidence * 100);
+  const posScore = Math.round(score * 100);
+  const negScore = 100 - posScore;
+
+  // Glow on input card
+  const card = document.getElementById('inputCard');
+  card.className = 'card ' + (isPositive ? 'pos-glow' : 'neg-glow');
+
+  // Icon
+  document.getElementById('sentIcon').textContent = isPositive ? '😊' : '😔';
+  document.getElementById('sentIcon').className = 'sentiment-icon ' + (isPositive ? 'positive' : 'negative');
+
+  // Title
+  const title = document.getElementById('sentTitle');
+  title.textContent = isPositive ? 'Positive' : 'Negative';
+  title.className = 'sentiment-title ' + (isPositive ? 'positive' : 'negative');
+
+  // Sub
+  const labels = isPositive
+    ? ['Optimistic tone detected', 'Uplifting sentiment', 'Favourable expression', 'Positive attitude found']
+    : ['Pessimistic tone detected', 'Unfavourable sentiment', 'Negative expression', 'Critical attitude found'];
+  document.getElementById('sentSub').textContent = labels[Math.floor(Math.random() * labels.length)];
+
+  // Confidence bar
+  document.getElementById('confValue').textContent = pct + '%';
+  const bar = document.getElementById('confBar');
+  bar.className = 'bar-fill ' + (isPositive ? 'positive' : 'negative');
+  setTimeout(() => { bar.style.width = pct + '%'; }, 50);
+
+  // Scores
+  document.getElementById('posScore').textContent = posScore + '%';
+  document.getElementById('negScore').textContent = negScore + '%';
+
+  // Keywords
+  const kw = document.getElementById('keywordChips');
+  kw.innerHTML = '';
+  const signals = extractSignals(text, isPositive);
+  if (signals.length === 0) {
+    const chip = document.createElement('span');
+    chip.className = 'chip neu';
+    chip.textContent = 'No strong signals';
+    kw.appendChild(chip);
+  } else {
+    signals.forEach((s, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'chip ' + s.type;
+      chip.textContent = s.word;
+      chip.style.animationDelay = (i * 60) + 'ms';
+      kw.appendChild(chip);
+    });
+  }
+
+  // Show result
+  const rc = document.getElementById('resultCard');
+  rc.classList.add('visible');
+
+  // ─── Console output ───────────────────────────────────────────────────
+  const posWords = signals.filter(s => s.type === 'pos').map(s => s.word);
+  const negWords = signals.filter(s => s.type === 'neg').map(s => s.word);
+
+  console.groupCollapsed(
+    `%c SentimentAI %c ${isPositive ? '✅ POSITIVE' : '❌ NEGATIVE'} %c ${pct}% confident `,
+    'background:#12121a;color:#7b8cde;font-weight:bold;padding:2px 6px;border-radius:4px 0 0 4px;',
+    isPositive
+      ? 'background:#00e5a0;color:#0a0a0f;font-weight:bold;padding:2px 6px;'
+      : 'background:#ff4f6d;color:#0a0a0f;font-weight:bold;padding:2px 6px;',
+    'background:#1a1a26;color:#e8e8f0;padding:2px 6px;border-radius:0 4px 4px 0;'
+  );
+
+  console.log('%c📝 Input Text', 'color:#7b8cde;font-weight:bold;');
+  console.log(`   "${text}"`);
+
+  console.log('%c📊 Scores', 'color:#7b8cde;font-weight:bold;');
+  console.table({
+    'Raw Score (0–1)': score.toFixed(6),
+    'Positive %':      posScore + '%',
+    'Negative %':      negScore + '%',
+    'Confidence':      pct + '%',
+    'Verdict':         isPositive ? '✅ POSITIVE' : '❌ NEGATIVE',
+    'Model Used':      model === 'dictionary' ? 'Dictionary Fallback' : 'TensorFlow CNN/RNN'
+  });
+
+  if (posWords.length > 0)
+    console.log('%c✅ Positive signals: %c' + posWords.join(', '),
+      'color:#00e5a0;font-weight:bold;', 'color:#e8e8f0;');
+  if (negWords.length > 0)
+    console.log('%c❌ Negative signals: %c' + negWords.join(', '),
+      'color:#ff4f6d;font-weight:bold;', 'color:#e8e8f0;');
+  if (posWords.length === 0 && negWords.length === 0)
+    console.log('%c⚪ No strong keyword signals detected', 'color:#6b6b8a;');
+
+  console.log('%c🕒 Timestamp', 'color:#7b8cde;font-weight:bold;', new Date().toLocaleTimeString());
+  console.groupEnd();
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+renderSamples();
+loadModel();
+</script>
+</body>
+</html>

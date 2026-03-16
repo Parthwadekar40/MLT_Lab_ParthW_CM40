@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentiment Classifier</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --border: #1e1e2e;
+    --pos: #00ff9d;
+    --neg: #ff3864;
+    --neutral: #7c7cff;
+    --text: #e8e8f0;
+    --muted: #555570;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px 60px;
+  }
+
+  /* Ambient glow bg */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse 60% 40% at 30% 20%, rgba(0,255,157,.07) 0%, transparent 70%),
+                radial-gradient(ellipse 50% 35% at 75% 80%, rgba(255,56,100,.06) 0%, transparent 70%);
+    pointer-events: none; z-index: 0;
+  }
+
+  .wrap { position: relative; z-index: 1; width: 100%; max-width: 760px; }
+
+  header { margin-bottom: 48px; }
+  .tag {
+    font-size: 10px; letter-spacing: .2em; color: var(--neutral);
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(28px, 6vw, 52px);
+    font-weight: 800; line-height: 1.1;
+  }
+  h1 span { color: var(--pos); }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 10px; line-height: 1.7; }
+
+  /* Status bar */
+  #status-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 12px 16px;
+    font-size: 12px; color: var(--muted); margin-bottom: 32px;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); flex-shrink: 0;
+    transition: background .3s;
+  }
+  .dot.active { background: var(--pos); box-shadow: 0 0 8px var(--pos); }
+  .dot.training { background: var(--neutral); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  /* Train section */
+  .section-label {
+    font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 16px;
+  }
+
+  .dataset {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    margin-bottom: 24px;
+  }
+  .ds-col { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .ds-col h3 { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 12px; }
+  .ds-col.pos h3 { color: var(--pos); }
+  .ds-col.neg h3 { color: var(--neg); }
+  .ds-col ul { list-style: none; }
+  .ds-col ul li {
+    font-size: 11px; color: var(--muted); padding: 5px 0;
+    border-bottom: 1px solid var(--border); line-height: 1.5;
+  }
+  .ds-col ul li:last-child { border-bottom: none; }
+
+  .btn {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px; letter-spacing: .1em;
+    text-transform: uppercase; cursor: pointer;
+    border: 1px solid; border-radius: 6px;
+    padding: 12px 24px; transition: all .2s;
+  }
+  #train-btn {
+    background: transparent; color: var(--neutral); border-color: var(--neutral);
+    width: 100%; margin-bottom: 24px;
+  }
+  #train-btn:hover:not(:disabled) { background: rgba(124,124,255,.12); }
+  #train-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* Training log */
+  #log {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; margin-bottom: 32px;
+    height: 130px; overflow-y: auto; font-size: 11px; color: var(--muted);
+    line-height: 1.8;
+  }
+  #log .line-pos { color: var(--pos); }
+  #log .line-neg { color: var(--neg); }
+  #log .line-info { color: var(--neutral); }
+
+  /* Inference */
+  #infer-section {
+    opacity: .3; pointer-events: none; transition: opacity .4s;
+  }
+  #infer-section.ready { opacity: 1; pointer-events: all; }
+
+  .input-row {
+    display: flex; gap: 10px; margin-bottom: 24px;
+  }
+  #sentence-input {
+    flex: 1; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 12px 16px; color: var(--text);
+    font-family: 'Space Mono', monospace; font-size: 12px;
+    outline: none; transition: border-color .2s;
+  }
+  #sentence-input:focus { border-color: var(--neutral); }
+  #predict-btn {
+    background: transparent; color: var(--pos); border-color: var(--pos);
+    white-space: nowrap;
+  }
+  #predict-btn:hover { background: rgba(0,255,157,.1); }
+
+  /* Result */
+  #result {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 24px; min-height: 110px;
+    display: flex; align-items: center; gap: 24px;
+  }
+  .result-icon {
+    font-size: 36px; flex-shrink: 0;
+    transition: all .3s;
+  }
+  .result-body { flex: 1; }
+  .result-label {
+    font-family: 'Syne', sans-serif; font-weight: 800;
+    font-size: 22px; letter-spacing: .05em;
+    transition: color .3s;
+  }
+  .result-conf { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .bar-wrap { margin-top: 14px; }
+  .bar-track {
+    background: var(--border); border-radius: 4px;
+    height: 6px; overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%; border-radius: 4px;
+    background: var(--neutral);
+    transition: width .5s cubic-bezier(.4,0,.2,1), background .3s;
+    width: 0%;
+  }
+  .bar-labels {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--muted); margin-top: 6px;
+  }
+
+  .placeholder-text { color: var(--muted); font-size: 12px; }
+
+  /* Accuracy badge */
+  #acc-badge {
+    display: inline-block; margin-top: 8px;
+    font-size: 11px; color: var(--pos); background: rgba(0,255,157,.08);
+    border: 1px solid rgba(0,255,157,.2); border-radius: 4px;
+    padding: 3px 10px;
+  }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="tag">// TF.js · Bag-of-Words · Binary Classification</div>
+    <h1>Sentiment<br><span>Classifier</span></h1>
+    <p class="sub">Trains a neural network in your browser on a small labeled dataset,<br>then classifies any sentence as positive or negative.</p>
+  </header>
+
+  <div id="status-bar">
+    <div class="dot" id="status-dot"></div>
+    <span id="status-text">Waiting to train…</span>
+  </div>
+
+  <!-- Dataset preview -->
+  <div class="section-label">Training Dataset</div>
+  <div class="dataset">
+    <div class="ds-col pos">
+      <h3>✦ Positive (1)</h3>
+      <ul id="pos-list"></ul>
+    </div>
+    <div class="ds-col neg">
+      <h3>✦ Negative (0)</h3>
+      <ul id="neg-list"></ul>
+    </div>
+  </div>
+
+  <button class="btn" id="train-btn">▶ Train Model</button>
+
+  <div class="section-label">Training Log</div>
+  <div id="log"><span class="placeholder-text">// logs will appear here…</span></div>
+
+  <!-- Inference -->
+  <div id="infer-section">
+    <div class="section-label">Classify a Sentence</div>
+    <div class="input-row">
+      <input id="sentence-input" type="text" placeholder="Type a sentence…" />
+      <button class="btn" id="predict-btn">Predict →</button>
+    </div>
+    <div id="result">
+      <span class="placeholder-text">// prediction will appear here</span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── Dataset ── */
+const DATA = {
+  positive: [
+    "I love this product so much",
+    "This is absolutely wonderful",
+    "Amazing experience, highly recommend",
+    "I feel so happy today",
+    "Great job, very impressive work",
+    "The movie was fantastic and thrilling",
+    "Excellent quality and fast delivery",
+    "I am really enjoying this",
+    "This made my day so much better",
+    "Outstanding performance all around",
+    "Super delightful and fun to use",
+    "Best decision I ever made",
+  ],
+  negative: [
+    "I hate this terrible product",
+    "This is absolutely horrible",
+    "Awful experience, do not recommend",
+    "I feel so sad and miserable",
+    "Bad work, very disappointing",
+    "The movie was boring and dull",
+    "Poor quality and slow delivery",
+    "I am really disliking this",
+    "This ruined my entire day",
+    "Dreadful performance throughout",
+    "Frustrating and painful to use",
+    "Worst decision I ever made",
+  ]
+};
+
+/* ── Populate dataset preview ── */
+const posEl = document.getElementById('pos-list');
+const negEl = document.getElementById('neg-list');
+DATA.positive.forEach(s => { const li = document.createElement('li'); li.textContent = s; posEl.appendChild(li); });
+DATA.negative.forEach(s => { const li = document.createElement('li'); li.textContent = s; negEl.appendChild(li); });
+
+/* ── Vocabulary ── */
+const allSentences = [...DATA.positive, ...DATA.negative];
+const vocab = {};
+let idx = 1;
+allSentences.forEach(s => {
+  s.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).forEach(w => {
+    if (w && !vocab[w]) vocab[w] = idx++;
+  });
+});
+const VOCAB_SIZE = idx;
+
+function tokenize(sentence) {
+  const vec = new Float32Array(VOCAB_SIZE);
+  sentence.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).forEach(w => {
+    if (vocab[w]) vec[vocab[w]] = 1;
+  });
+  return vec;
+}
+
+/* ── Build tensors ── */
+function buildDataset() {
+  const xs = [], ys = [];
+  DATA.positive.forEach(s => { xs.push(Array.from(tokenize(s))); ys.push(1); });
+  DATA.negative.forEach(s => { xs.push(Array.from(tokenize(s))); ys.push(0); });
+  // shuffle
+  const n = xs.length;
+  for (let i = n-1; i > 0; i--) {
+    const j = Math.floor(Math.random()*(i+1));
+    [xs[i],xs[j]] = [xs[j],xs[i]];
+    [ys[i],ys[j]] = [ys[j],ys[i]];
+  }
+  return {
+    xTensor: tf.tensor2d(xs),
+    yTensor: tf.tensor1d(ys, 'float32')
+  };
+}
+
+/* ── Model ── */
+function buildModel() {
+  const m = tf.sequential();
+  m.add(tf.layers.dense({ inputShape: [VOCAB_SIZE], units: 32, activation: 'relu' }));
+  m.add(tf.layers.dropout({ rate: 0.3 }));
+  m.add(tf.layers.dense({ units: 16, activation: 'relu' }));
+  m.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+  m.compile({ optimizer: tf.train.adam(0.01), loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+  return m;
+}
+
+/* ── Logging ── */
+const logEl = document.getElementById('log');
+function log(msg, cls='') {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.innerHTML = logEl.innerHTML.replace('<span class="placeholder-text">// logs will appear here…</span>','');
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+/* ── Status ── */
+function setStatus(text, state) {
+  document.getElementById('status-text').textContent = text;
+  const dot = document.getElementById('status-dot');
+  dot.className = 'dot' + (state ? ' '+state : '');
+}
+
+/* ── Training ── */
+let model = null;
+
+document.getElementById('train-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('train-btn');
+  btn.disabled = true;
+  logEl.innerHTML = '';
+  setStatus('Building vocabulary & tensors…', 'training');
+  await tf.nextFrame();
+
+  const { xTensor, yTensor } = buildDataset();
+  model = buildModel();
+
+  log(`// vocab size: ${VOCAB_SIZE}  samples: ${allSentences.length}`, 'line-info');
+  log(`// architecture: ${VOCAB_SIZE} → 32 → 16 → 1`, 'line-info');
+  log('// starting training…', 'line-info');
+  setStatus('Training… please wait', 'training');
+
+  await model.fit(xTensor, yTensor, {
+    epochs: 80,
+    batchSize: 8,
+    shuffle: true,
+    callbacks: {
+      onEpochEnd: async (epoch, logs) => {
+        if ((epoch+1) % 10 === 0) {
+          const acc = (logs.acc * 100).toFixed(1);
+          const loss = logs.loss.toFixed(4);
+          const cls = logs.acc > 0.85 ? 'line-pos' : 'line-neg';
+          log(`  epoch ${String(epoch+1).padStart(3,'0')} — loss: ${loss}  acc: ${acc}%`, cls);
+          await tf.nextFrame();
+        }
+      }
+    }
+  });
+
+  xTensor.dispose(); yTensor.dispose();
+
+  // Final eval
+  const { xTensor: xFinal, yTensor: yFinal } = buildDataset();
+  const evalResult = model.evaluate(xFinal, yFinal);
+  const finalAcc = (await evalResult[1].data())[0];
+  xFinal.dispose(); yFinal.dispose();
+
+  log(`// training complete — final acc: ${(finalAcc*100).toFixed(1)}%`, 'line-pos');
+  setStatus(`Model ready — accuracy ${(finalAcc*100).toFixed(1)}%`, 'active');
+
+  document.getElementById('infer-section').classList.add('ready');
+  btn.textContent = '↺ Retrain';
+  btn.disabled = false;
+});
+
+/* ── Prediction ── */
+document.getElementById('predict-btn').addEventListener('click', predict);
+document.getElementById('sentence-input').addEventListener('keydown', e => { if(e.key==='Enter') predict(); });
+
+function predict() {
+  if (!model) return;
+  const input = document.getElementById('sentence-input').value.trim();
+  if (!input) return;
+
+  const vec = tf.tensor2d([Array.from(tokenize(input))]);
+  const pred = model.predict(vec);
+  pred.data().then(([score]) => {
+    vec.dispose(); pred.dispose();
+    renderResult(input, score);
+  });
+}
+
+function renderResult(sentence, score) {
+  const isPos = score >= 0.5;
+  const conf = isPos ? score : 1 - score;
+  const pct = Math.round(conf * 100);
+  const label = isPos ? 'POSITIVE' : 'NEGATIVE';
+  const icon = isPos ? '◎' : '◌';
+  const color = isPos ? 'var(--pos)' : 'var(--neg)';
+
+  document.getElementById('result').innerHTML = `
+    <div class="result-icon" style="color:${color}">${icon}</div>
+    <div class="result-body">
+      <div class="result-label" style="color:${color}">${label}</div>
+      <div class="result-conf">confidence: ${pct}%  ·  raw score: ${score.toFixed(4)}</div>
+      <div class="bar-wrap">
+        <div class="bar-track">
+          <div class="bar-fill" id="bar" style="background:${color}"></div>
+        </div>
+        <div class="bar-labels"><span>NEG</span><span>POS</span></div>
+      </div>
+    </div>
+  `;
+  // animate bar to score position
+  requestAnimationFrame(() => {
+    document.getElementById('bar').style.width = (score * 100) + '%';
+  });
+}
+</script>
+</body>
+</html>

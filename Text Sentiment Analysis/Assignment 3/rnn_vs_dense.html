@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RNN vs Dense — Sentiment</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#0d0d0d;
+  --panel:#141414;
+  --line:#2a2a2a;
+  --text:#e8e8e0;
+  --dim:#555550;
+  --rnn:#f0c040;
+  --dense:#40c8f0;
+  --pos:#50e090;
+  --neg:#f05050;
+  --rnn-dim:#6b5518;
+  --dense-dim:#185a6b;
+}
+
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'IBM Plex Mono',monospace;
+  min-height:100vh;
+}
+
+/* ── GRID LAYOUT ── */
+.layout{
+  display:grid;
+  grid-template-columns:320px 1fr;
+  grid-template-rows:auto;
+  min-height:100vh;
+}
+
+/* ── SIDEBAR ── */
+.sidebar{
+  border-right:1px solid var(--line);
+  padding:32px 24px;
+  display:flex;
+  flex-direction:column;
+  gap:28px;
+  position:sticky;
+  top:0;
+  height:100vh;
+  overflow-y:auto;
+}
+
+.logo{
+  font-family:'Bebas Neue',sans-serif;
+  font-size:38px;
+  line-height:1;
+  letter-spacing:.02em;
+  color:var(--text);
+}
+.logo span{display:block;font-size:14px;font-family:'IBM Plex Mono',monospace;font-weight:300;color:var(--dim);letter-spacing:.15em;margin-top:4px;}
+
+.sep{height:1px;background:var(--line);}
+
+/* Model cards in sidebar */
+.model-card{
+  border:1px solid var(--line);
+  padding:14px;
+  position:relative;
+}
+.model-card::before{
+  content:'';
+  position:absolute;left:0;top:0;bottom:0;width:3px;
+}
+.mc-rnn::before{background:var(--rnn);}
+.mc-dense::before{background:var(--dense);}
+
+.mc-name{
+  font-family:'Bebas Neue',sans-serif;
+  font-size:22px;letter-spacing:.05em;
+  margin-bottom:6px;
+}
+.mc-rnn .mc-name{color:var(--rnn);}
+.mc-dense .mc-name{color:var(--dense);}
+
+.mc-arch{font-size:10px;color:var(--dim);line-height:2;}
+.mc-arch span{color:var(--text);}
+
+.status-block{margin-top:8px;}
+.status-row{
+  display:flex;align-items:center;gap:8px;
+  font-size:11px;color:var(--dim);margin-bottom:4px;
+}
+.status-dot{width:6px;height:6px;border-radius:50%;background:var(--dim);flex-shrink:0;}
+.status-dot.go{background:var(--pos);box-shadow:0 0 6px var(--pos);}
+.status-dot.run{background:var(--rnn);animation:pulse .8s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}}
+.status-dot.run2{background:var(--dense);animation:pulse .8s infinite;}
+
+.acc-display{
+  font-family:'Bebas Neue',sans-serif;
+  font-size:36px;color:var(--text);
+  line-height:1;
+}
+.acc-label{font-size:10px;color:var(--dim);letter-spacing:.12em;text-transform:uppercase;margin-bottom:2px;}
+
+/* Big train button */
+#train-btn{
+  font-family:'Bebas Neue',sans-serif;
+  font-size:22px;letter-spacing:.08em;
+  width:100%;padding:14px;
+  background:var(--text);color:var(--bg);
+  border:none;cursor:pointer;
+  transition:opacity .15s;
+}
+#train-btn:hover:not(:disabled){opacity:.85;}
+#train-btn:disabled{opacity:.3;cursor:not-allowed;}
+
+.epoch-log{
+  font-size:10px;color:var(--dim);
+  height:80px;overflow-y:auto;
+  border:1px solid var(--line);
+  padding:8px;
+  line-height:1.9;
+}
+.epoch-log .rnn-line{color:var(--rnn);}
+.epoch-log .dense-line{color:var(--dense);}
+.epoch-log .sys{color:var(--dim);}
+
+/* ── MAIN ── */
+.main{
+  padding:32px;
+  display:flex;
+  flex-direction:column;
+  gap:32px;
+}
+
+/* Section headings */
+.sec-head{
+  font-family:'Bebas Neue',sans-serif;
+  font-size:13px;letter-spacing:.25em;
+  color:var(--dim);
+  border-bottom:1px solid var(--line);
+  padding-bottom:8px;
+  margin-bottom:16px;
+}
+
+/* ── METRICS GRID ── */
+.metrics-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:1px;
+  background:var(--line);
+  border:1px solid var(--line);
+}
+.metric{
+  background:var(--panel);
+  padding:18px;
+}
+.metric-label{font-size:10px;color:var(--dim);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px;}
+.metric-values{display:flex;flex-direction:column;gap:6px;}
+.mv{display:flex;justify-content:space-between;align-items:baseline;}
+.mv-tag{font-size:10px;font-weight:500;}
+.mv-tag.rnn{color:var(--rnn);}
+.mv-tag.dense{color:var(--dense);}
+.mv-val{font-size:20px;font-family:'Bebas Neue',sans-serif;color:var(--text);}
+.mv-val.winner{color:var(--pos);}
+
+/* ── CHART AREA ── */
+.charts-row{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+.chart-box{
+  border:1px solid var(--line);
+  background:var(--panel);
+  padding:20px;
+}
+.chart-title{
+  font-family:'Bebas Neue',sans-serif;
+  font-size:16px;letter-spacing:.1em;color:var(--dim);
+  margin-bottom:16px;
+}
+.chart-wrap{position:relative;height:200px;}
+
+/* ── TEST AREA ── */
+.test-area{}
+.test-input-row{display:flex;gap:10px;margin-bottom:16px;}
+input[type=text]{
+  flex:1;
+  background:var(--panel);
+  border:1px solid var(--line);
+  color:var(--text);
+  font-family:'IBM Plex Mono',monospace;
+  font-size:13px;
+  padding:12px 14px;
+  outline:none;
+  transition:border-color .15s;
+}
+input[type=text]:focus{border-color:var(--dim);}
+input[type=text]::placeholder{color:var(--dim);}
+#test-btn{
+  font-family:'Bebas Neue',sans-serif;
+  font-size:18px;letter-spacing:.06em;
+  padding:12px 24px;
+  background:transparent;
+  border:1px solid var(--dim);
+  color:var(--text);
+  cursor:pointer;
+  transition:all .15s;
+}
+#test-btn:hover:not(:disabled){border-color:var(--text);}
+#test-btn:disabled{opacity:.3;cursor:not-allowed;}
+
+/* Prediction cards */
+.pred-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:1px;
+  background:var(--line);
+  border:1px solid var(--line);
+  margin-bottom:12px;
+}
+.pred-cell{
+  background:var(--panel);
+  padding:16px 18px;
+}
+.pred-model-name{
+  font-family:'Bebas Neue',sans-serif;
+  font-size:18px;letter-spacing:.06em;
+  margin-bottom:10px;
+}
+.pred-model-name.rnn{color:var(--rnn);}
+.pred-model-name.dense{color:var(--dense);}
+.pred-verdict{
+  font-family:'Bebas Neue',sans-serif;
+  font-size:32px;line-height:1;
+  margin-bottom:8px;
+}
+.pred-verdict.pos{color:var(--pos);}
+.pred-verdict.neg{color:var(--neg);}
+.pred-verdict.unc{color:var(--dim);}
+.pred-bar-wrap{margin-bottom:6px;}
+.pred-bar-track{height:4px;background:var(--line);}
+.pred-bar-fill{height:100%;transition:width .5s cubic-bezier(.4,0,.2,1);}
+.pred-bar-fill.rnn-fill{background:var(--rnn);}
+.pred-bar-fill.dense-fill{background:var(--dense);}
+.pred-score{font-size:11px;color:var(--dim);}
+
+/* Test history */
+.history-table{width:100%;border-collapse:collapse;font-size:12px;}
+.history-table th{
+  text-align:left;padding:6px 10px;
+  border-bottom:1px solid var(--line);
+  font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);
+  font-weight:400;
+}
+.history-table td{
+  padding:8px 10px;
+  border-bottom:1px solid var(--line);
+  color:var(--text);
+  vertical-align:middle;
+}
+.history-table tr:last-child td{border-bottom:none;}
+.agree-badge{
+  font-size:10px;padding:2px 8px;
+  border:1px solid;
+}
+.agree-badge.yes{color:var(--pos);border-color:var(--pos);}
+.agree-badge.no{color:var(--neg);border-color:var(--neg);}
+.agree-badge.unc{color:var(--dim);border-color:var(--dim);}
+
+/* Presets row */
+.preset-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;}
+.preset-chip{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:10px;padding:4px 10px;
+  background:transparent;border:1px solid var(--line);
+  color:var(--dim);cursor:pointer;transition:all .15s;
+  letter-spacing:.04em;
+}
+.preset-chip:hover{border-color:var(--dim);color:var(--text);}
+
+/* Comparison insight box */
+.insight-box{
+  border:1px solid var(--line);
+  padding:16px 18px;
+  background:var(--panel);
+  font-size:12px;line-height:1.8;color:var(--dim);
+}
+.insight-box strong{color:var(--text);font-weight:500;}
+
+/* Responsive */
+@media(max-width:900px){
+  .layout{grid-template-columns:1fr;}
+  .sidebar{position:static;height:auto;}
+  .charts-row{grid-template-columns:1fr;}
+  .metrics-grid{grid-template-columns:repeat(2,1fr);}
+}
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+<!-- ═══ SIDEBAR ═══ -->
+<aside class="sidebar">
+  <div>
+    <div class="logo">MODEL<br>ARENA<span>// sentiment · rnn vs dense</span></div>
+  </div>
+
+  <div class="sep"></div>
+
+  <!-- RNN card -->
+  <div class="model-card mc-rnn">
+    <div class="mc-name">RNN</div>
+    <div class="mc-arch">
+      Embedding → <span>SimpleRNN(32)</span><br>
+      → Dense(16, relu)<br>
+      → Dense(1, sigmoid)<br>
+      Params: <span id="rnn-params">—</span>
+    </div>
+    <div class="status-block">
+      <div class="status-row"><div class="status-dot" id="rnn-dot"></div><span id="rnn-status">idle</span></div>
+      <div class="acc-label">Final accuracy</div>
+      <div class="acc-display" id="rnn-acc">—</div>
+    </div>
+  </div>
+
+  <!-- Dense card -->
+  <div class="model-card mc-dense">
+    <div class="mc-name">Dense</div>
+    <div class="mc-arch">
+      Bag-of-Words → <span>Dense(64, relu)</span><br>
+      → Dropout(0.3) → Dense(32, relu)<br>
+      → Dense(1, sigmoid)<br>
+      Params: <span id="dense-params">—</span>
+    </div>
+    <div class="status-block">
+      <div class="status-row"><div class="status-dot" id="dense-dot"></div><span id="dense-status">idle</span></div>
+      <div class="acc-label">Final accuracy</div>
+      <div class="acc-display" id="dense-acc">—</div>
+    </div>
+  </div>
+
+  <div class="sep"></div>
+
+  <button id="train-btn">▶ TRAIN BOTH</button>
+
+  <div>
+    <div class="acc-label" style="margin-bottom:6px">Training log</div>
+    <div class="epoch-log" id="log"><span class="sys">// waiting…</span></div>
+  </div>
+</aside>
+
+<!-- ═══ MAIN ═══ -->
+<main class="main">
+
+  <!-- Metrics -->
+  <section>
+    <div class="sec-head">Performance Metrics</div>
+    <div class="metrics-grid">
+      <div class="metric">
+        <div class="metric-label">Train Accuracy</div>
+        <div class="metric-values">
+          <div class="mv"><span class="mv-tag rnn">RNN</span><span class="mv-val" id="m-rnn-acc">—</span></div>
+          <div class="mv"><span class="mv-tag dense">DENSE</span><span class="mv-val" id="m-dense-acc">—</span></div>
+        </div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Train Loss</div>
+        <div class="metric-values">
+          <div class="mv"><span class="mv-tag rnn">RNN</span><span class="mv-val" id="m-rnn-loss">—</span></div>
+          <div class="mv"><span class="mv-tag dense">DENSE</span><span class="mv-val" id="m-dense-loss">—</span></div>
+        </div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Train Time</div>
+        <div class="metric-values">
+          <div class="mv"><span class="mv-tag rnn">RNN</span><span class="mv-val" id="m-rnn-time">—</span></div>
+          <div class="mv"><span class="mv-tag dense">DENSE</span><span class="mv-val" id="m-dense-time">—</span></div>
+        </div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Parameters</div>
+        <div class="metric-values">
+          <div class="mv"><span class="mv-tag rnn">RNN</span><span class="mv-val" id="m-rnn-p">—</span></div>
+          <div class="mv"><span class="mv-tag dense">DENSE</span><span class="mv-val" id="m-dense-p">—</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Charts -->
+  <section>
+    <div class="sec-head">Training Curves</div>
+    <div class="charts-row">
+      <div class="chart-box">
+        <div class="chart-title">Accuracy / Epoch</div>
+        <div class="chart-wrap"><canvas id="acc-chart"></canvas></div>
+      </div>
+      <div class="chart-box">
+        <div class="chart-title">Loss / Epoch</div>
+        <div class="chart-wrap"><canvas id="loss-chart"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Live test -->
+  <section class="test-area">
+    <div class="sec-head">Live Comparison Test</div>
+
+    <div class="preset-row" id="preset-row"></div>
+
+    <div class="test-input-row">
+      <input type="text" id="test-input" placeholder="Type a sentence and compare both models…" />
+      <button id="test-btn" disabled>PREDICT</button>
+    </div>
+
+    <div class="pred-grid" id="pred-grid">
+      <div class="pred-cell">
+        <div class="pred-model-name rnn">RNN</div>
+        <div class="pred-verdict unc" id="rnn-verdict">—</div>
+        <div class="pred-bar-wrap"><div class="pred-bar-track"><div class="pred-bar-fill rnn-fill" id="rnn-bar" style="width:0%"></div></div></div>
+        <div class="pred-score" id="rnn-score">score: —</div>
+      </div>
+      <div class="pred-cell">
+        <div class="pred-model-name dense">DENSE</div>
+        <div class="pred-verdict unc" id="dense-verdict">—</div>
+        <div class="pred-bar-wrap"><div class="pred-bar-track"><div class="pred-bar-fill dense-fill" id="dense-bar" style="width:0%"></div></div></div>
+        <div class="pred-score" id="dense-score">score: —</div>
+      </div>
+    </div>
+
+    <!-- Insight -->
+    <div class="insight-box" id="insight-box">
+      Train both models to enable live comparison. Each prediction will show where the models agree, disagree, and by how much.
+    </div>
+  </section>
+
+  <!-- History -->
+  <section id="history-section" style="display:none">
+    <div class="sec-head">Test History</div>
+    <table class="history-table">
+      <thead>
+        <tr>
+          <th>Sentence</th>
+          <th>RNN</th>
+          <th>Dense</th>
+          <th>Agree?</th>
+          <th>Δ Score</th>
+        </tr>
+      </thead>
+      <tbody id="history-body"></tbody>
+    </table>
+  </section>
+
+</main>
+</div>
+
+<script>
+/* ════════════════════════════════
+   DATASET
+════════════════════════════════ */
+const POS = [
+  "I love this so much","absolutely wonderful experience","amazing highly recommend",
+  "I feel so happy today","great job very impressive","fantastic and thrilling",
+  "excellent quality fast delivery","really enjoying this","made my day better",
+  "outstanding performance overall","super delightful fun to use","best decision ever made",
+  "thrilled with the results","really positive experience","brings me so much joy",
+  "I am overjoyed with this","wonderful amazing perfect","love every single part",
+];
+const NEG = [
+  "I hate this product","absolutely horrible experience","awful do not recommend",
+  "I feel so sad miserable","bad work very disappointing","boring and dull movie",
+  "poor quality slow delivery","really disliking this","ruined my entire day",
+  "dreadful performance throughout","frustrating and painful","worst decision ever made",
+  "disgusted with the results","really negative experience","brings me so much grief",
+  "I am appalled by this","terrible horrible awful","hate every single part",
+];
+
+const ALL = [...POS, ...NEG];
+const LABELS = [...POS.map(()=>1), ...NEG.map(()=>0)];
+
+/* ════════════════════════════════
+   VOCABULARY  (for Dense BoW)
+════════════════════════════════ */
+const vocab = {};
+let vIdx = 1;
+ALL.forEach(s => s.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).forEach(w => { if(w && !vocab[w]) vocab[w]=vIdx++; }));
+const VOCAB_SIZE = vIdx;
+
+function bow(s) {
+  const v = new Float32Array(VOCAB_SIZE);
+  s.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).forEach(w => { if(vocab[w]) v[vocab[w]]=1; });
+  return v;
+}
+
+/* ════════════════════════════════
+   VOCABULARY  (for RNN — integer tokens)
+════════════════════════════════ */
+const MAX_LEN = 12;
+function encodeSeq(s) {
+  const words = s.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/);
+  const seq = new Array(MAX_LEN).fill(0);
+  words.slice(0, MAX_LEN).forEach((w, i) => { if(vocab[w]) seq[i] = vocab[w]; });
+  return seq;
+}
+
+/* ════════════════════════════════
+   SHUFFLE TOGETHER
+════════════════════════════════ */
+function shuffled() {
+  const idx = [...Array(ALL.length).keys()];
+  for(let i=idx.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[idx[i],idx[j]]=[idx[j],idx[i]];}
+  return idx;
+}
+
+/* ════════════════════════════════
+   LOG
+════════════════════════════════ */
+const logEl = document.getElementById('log');
+function log(msg, cls='sys') {
+  logEl.innerHTML = logEl.innerHTML.replace('<span class="sys">// waiting…</span>','');
+  const d = document.createElement('div');
+  d.className = cls; d.textContent = msg;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+/* ════════════════════════════════
+   CHARTS
+════════════════════════════════ */
+const chartOpts = (label) => ({
+  responsive: true, maintainAspectRatio: false,
+  animation: { duration: 0 },
+  plugins: { legend: { labels: { color:'#555550', font:{ family:'IBM Plex Mono', size:10 }, boxWidth:10 } } },
+  scales: {
+    x: { ticks: { color:'#555550', font:{size:9} }, grid:{ color:'#1e1e1e' }, border:{color:'#2a2a2a'} },
+    y: { ticks: { color:'#555550', font:{size:9} }, grid:{ color:'#1e1e1e' }, border:{color:'#2a2a2a'} }
+  }
+});
+
+const accChart = new Chart(document.getElementById('acc-chart'), {
+  type:'line', data:{ labels:[], datasets:[
+    { label:'RNN', data:[], borderColor:'#f0c040', backgroundColor:'rgba(240,192,64,.08)', tension:.3, pointRadius:0, borderWidth:2 },
+    { label:'Dense', data:[], borderColor:'#40c8f0', backgroundColor:'rgba(64,200,240,.08)', tension:.3, pointRadius:0, borderWidth:2 },
+  ]}, options: chartOpts('accuracy')
+});
+
+const lossChart = new Chart(document.getElementById('loss-chart'), {
+  type:'line', data:{ labels:[], datasets:[
+    { label:'RNN', data:[], borderColor:'#f0c040', backgroundColor:'rgba(240,192,64,.08)', tension:.3, pointRadius:0, borderWidth:2 },
+    { label:'Dense', data:[], borderColor:'#40c8f0', backgroundColor:'rgba(64,200,240,.08)', tension:.3, pointRadius:0, borderWidth:2 },
+  ]}, options: chartOpts('loss')
+});
+
+function pushChart(epoch, rnnAcc, rnnLoss, denseAcc, denseLoss) {
+  const lbl = String(epoch);
+  accChart.data.labels.push(lbl);
+  accChart.data.datasets[0].data.push(+(rnnAcc*100).toFixed(1));
+  accChart.data.datasets[1].data.push(+(denseAcc*100).toFixed(1));
+  lossChart.data.labels.push(lbl);
+  lossChart.data.datasets[0].data.push(+rnnLoss.toFixed(4));
+  lossChart.data.datasets[1].data.push(+denseLoss.toFixed(4));
+  accChart.update('none');
+  lossChart.update('none');
+}
+
+/* ════════════════════════════════
+   MODELS
+════════════════════════════════ */
+let rnnModel = null, denseModel = null;
+let trained = false;
+
+function buildRNN() {
+  const m = tf.sequential();
+  m.add(tf.layers.embedding({ inputDim: VOCAB_SIZE, outputDim: 16, inputLength: MAX_LEN }));
+  m.add(tf.layers.simpleRNN({ units: 32, returnSequences: false }));
+  m.add(tf.layers.dense({ units: 16, activation:'relu' }));
+  m.add(tf.layers.dense({ units: 1, activation:'sigmoid' }));
+  m.compile({ optimizer: tf.train.adam(0.01), loss:'binaryCrossentropy', metrics:['accuracy'] });
+  return m;
+}
+
+function buildDense() {
+  const m = tf.sequential();
+  m.add(tf.layers.dense({ inputShape:[VOCAB_SIZE], units:64, activation:'relu' }));
+  m.add(tf.layers.dropout({ rate:.3 }));
+  m.add(tf.layers.dense({ units:32, activation:'relu' }));
+  m.add(tf.layers.dense({ units:1, activation:'sigmoid' }));
+  m.compile({ optimizer: tf.train.adam(0.01), loss:'binaryCrossentropy', metrics:['accuracy'] });
+  return m;
+}
+
+function countParams(m) { return m.countParams().toLocaleString(); }
+
+document.getElementById('train-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('train-btn');
+  btn.disabled = true;
+
+  // reset charts
+  accChart.data.labels = [];
+  accChart.data.datasets.forEach(d=>d.data=[]);
+  lossChart.data.labels = [];
+  lossChart.data.datasets.forEach(d=>d.data=[]);
+  accChart.update(); lossChart.update();
+
+  const ord = shuffled();
+  const EPOCHS = 60;
+
+  /* ── Build RNN tensors ── */
+  const rnnXs = tf.tensor2d(ord.map(i => encodeSeq(ALL[i])));
+  const rnnYs = tf.tensor1d(ord.map(i => LABELS[i]), 'float32');
+
+  /* ── Build Dense tensors ── */
+  const denseXs = tf.tensor2d(ord.map(i => Array.from(bow(ALL[i]))));
+  const denseYs = tf.tensor1d(ord.map(i => LABELS[i]), 'float32');
+
+  rnnModel = buildRNN();
+  denseModel = buildDense();
+
+  document.getElementById('rnn-params').textContent = countParams(rnnModel);
+  document.getElementById('dense-params').textContent = countParams(denseModel);
+  document.getElementById('m-rnn-p').textContent = countParams(rnnModel);
+  document.getElementById('m-dense-p').textContent = countParams(denseModel);
+
+  const setDot = (id, state) => {
+    const d = document.getElementById(id);
+    d.className = 'status-dot ' + state;
+  };
+
+  log('// building models…');
+  setDot('rnn-dot','run'); document.getElementById('rnn-status').textContent = 'training…';
+  setDot('dense-dot','run2'); document.getElementById('dense-status').textContent = 'training…';
+
+  let rnnHistory = { acc:[], loss:[] };
+  let denseHistory = { acc:[], loss:[] };
+  let rnnLastAcc=0, rnnLastLoss=0, denseLastAcc=0, denseLastLoss=0;
+
+  const rnnStart = Date.now();
+  await rnnModel.fit(rnnXs, rnnYs, {
+    epochs: EPOCHS, batchSize: 8, shuffle: true,
+    callbacks: {
+      onEpochEnd: async (ep, logs) => {
+        rnnHistory.acc.push(logs.acc);
+        rnnHistory.loss.push(logs.loss);
+        rnnLastAcc = logs.acc; rnnLastLoss = logs.loss;
+        if((ep+1)%10===0) {
+          log(`RNN  ep${ep+1}  acc=${( logs.acc*100).toFixed(1)}%  loss=${logs.loss.toFixed(4)}`, 'rnn-line');
+          await tf.nextFrame();
+        }
+        // push partial chart (will be overwritten by dense pass)
+        if(!denseHistory.acc.length) {
+          // only rnn so far
+        }
+      }
+    }
+  });
+  const rnnTime = ((Date.now()-rnnStart)/1000).toFixed(1)+'s';
+
+  const denseStart = Date.now();
+  await denseModel.fit(denseXs, denseYs, {
+    epochs: EPOCHS, batchSize: 8, shuffle: true,
+    callbacks: {
+      onEpochEnd: async (ep, logs) => {
+        denseHistory.acc.push(logs.acc);
+        denseHistory.loss.push(logs.loss);
+        denseLastAcc = logs.acc; denseLastLoss = logs.loss;
+        if((ep+1)%10===0) {
+          log(`DENSE ep${ep+1}  acc=${(logs.acc*100).toFixed(1)}%  loss=${logs.loss.toFixed(4)}`, 'dense-line');
+          await tf.nextFrame();
+        }
+        // sync chart
+        pushChart(ep+1, rnnHistory.acc[ep]||0, rnnHistory.loss[ep]||0, logs.acc, logs.loss);
+      }
+    }
+  });
+  const denseTime = ((Date.now()-denseStart)/1000).toFixed(1)+'s';
+
+  rnnXs.dispose(); rnnYs.dispose();
+  denseXs.dispose(); denseYs.dispose();
+
+  // Final metrics
+  const ra = (rnnLastAcc*100).toFixed(1)+'%';
+  const da = (denseLastAcc*100).toFixed(1)+'%';
+  document.getElementById('rnn-acc').textContent = ra;
+  document.getElementById('dense-acc').textContent = da;
+  document.getElementById('m-rnn-acc').textContent = ra;
+  document.getElementById('m-dense-acc').textContent = da;
+  document.getElementById('m-rnn-loss').textContent = rnnLastLoss.toFixed(4);
+  document.getElementById('m-dense-loss').textContent = denseLastLoss.toFixed(4);
+  document.getElementById('m-rnn-time').textContent = rnnTime;
+  document.getElementById('m-dense-time').textContent = denseTime;
+
+  // Highlight winner in acc
+  const rnnAccEl = document.getElementById('m-rnn-acc');
+  const denseAccEl = document.getElementById('m-dense-acc');
+  if(rnnLastAcc >= denseLastAcc) rnnAccEl.classList.add('winner');
+  else denseAccEl.classList.add('winner');
+
+  setDot('rnn-dot','go'); document.getElementById('rnn-status').textContent = 'ready';
+  setDot('dense-dot','go'); document.getElementById('dense-status').textContent = 'ready';
+
+  log('// both models trained ✓', 'sys');
+  trained = true;
+  btn.disabled = false;
+  btn.textContent = '↺ RETRAIN';
+  document.getElementById('test-btn').disabled = false;
+
+  // Update insight box
+  const winner = rnnLastAcc >= denseLastAcc ? 'RNN' : 'Dense';
+  const margin = Math.abs(rnnLastAcc - denseLastAcc)*100;
+  document.getElementById('insight-box').innerHTML = `
+    <strong>${winner}</strong> outperformed by <strong>${margin.toFixed(1)}pp</strong> on this dataset. 
+    Dense networks with bag-of-words excel when <strong>word presence</strong> is the signal — they're faster and more parameter-efficient. 
+    RNNs capture <strong>sequence order</strong> (e.g. "not good" vs "good") but need more data to shine. 
+    On small corpora like this, the advantage can swing either way depending on random init.
+  `;
+});
+
+/* ════════════════════════════════
+   PRESETS
+════════════════════════════════ */
+const CHIPS = [
+  "I love this", "Absolutely terrible", "Not bad I guess",
+  "Oh great another crash", "The file is 4mb", "Could not be worse",
+  "Pretty decent overall", "Best thing ever", "I didn't hate it"
+];
+const presetRow = document.getElementById('preset-row');
+CHIPS.forEach(c => {
+  const b = document.createElement('button');
+  b.className = 'preset-chip'; b.textContent = c;
+  b.onclick = () => { document.getElementById('test-input').value = c; };
+  presetRow.appendChild(b);
+});
+
+/* ════════════════════════════════
+   PREDICT
+════════════════════════════════ */
+async function predict() {
+  if(!trained) return;
+  const s = document.getElementById('test-input').value.trim();
+  if(!s) return;
+
+  // RNN predict
+  const rnnIn = tf.tensor2d([encodeSeq(s)]);
+  const rnnPred = rnnModel.predict(rnnIn);
+  const [rnnScore] = await rnnPred.data();
+  rnnIn.dispose(); rnnPred.dispose();
+
+  // Dense predict
+  const denseIn = tf.tensor2d([Array.from(bow(s))]);
+  const densePred = denseModel.predict(denseIn);
+  const [denseScore] = await densePred.data();
+  denseIn.dispose(); densePred.dispose();
+
+  const fmt = (sc) => {
+    if(sc>=0.55) return {label:'POSITIVE', cls:'pos'};
+    if(sc<=0.45) return {label:'NEGATIVE', cls:'neg'};
+    return {label:'UNCERTAIN', cls:'unc'};
+  };
+
+  const rnnF = fmt(rnnScore);
+  const denseF = fmt(denseScore);
+
+  document.getElementById('rnn-verdict').textContent = rnnF.label;
+  document.getElementById('rnn-verdict').className = 'pred-verdict '+rnnF.cls;
+  document.getElementById('rnn-bar').style.width = Math.round(rnnScore*100)+'%';
+  document.getElementById('rnn-score').textContent = `score: ${rnnScore.toFixed(4)}`;
+
+  document.getElementById('dense-verdict').textContent = denseF.label;
+  document.getElementById('dense-verdict').className = 'pred-verdict '+denseF.cls;
+  document.getElementById('dense-bar').style.width = Math.round(denseScore*100)+'%';
+  document.getElementById('dense-score').textContent = `score: ${denseScore.toFixed(4)}`;
+
+  const agree = rnnF.label === denseF.label;
+  const delta = Math.abs(rnnScore - denseScore).toFixed(3);
+
+  // Update insight
+  let insightText = '';
+  if(agree) {
+    insightText = `Both models agree: <strong>${rnnF.label}</strong>. Score delta is <strong>${delta}</strong> — ${parseFloat(delta)<0.1?'very close, both highly confident in same direction':'some divergence in magnitude but same verdict'}.`;
+  } else {
+    insightText = `Models <strong>disagree</strong>. RNN says <strong>${rnnF.label}</strong>, Dense says <strong>${denseF.label}</strong>. Delta: <strong>${delta}</strong>. This often happens with hedged, sarcastic, or out-of-vocabulary sentences where sequence context (RNN) and word presence (Dense) give different signals.`;
+  }
+  document.getElementById('insight-box').innerHTML = insightText;
+
+  // History
+  const tbody = document.getElementById('history-body');
+  const tr = document.createElement('tr');
+  const agreeClass = agree ? (rnnF.label==='UNCERTAIN'?'unc':'yes') : 'no';
+  tr.innerHTML = `
+    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${s}">"${s}"</td>
+    <td style="color:${rnnF.cls==='pos'?'var(--pos)':rnnF.cls==='neg'?'var(--neg)':'var(--dim)'}">${rnnF.label} (${rnnScore.toFixed(3)})</td>
+    <td style="color:${denseF.cls==='pos'?'var(--pos)':denseF.cls==='neg'?'var(--neg)':'var(--dim)'}">${denseF.label} (${denseScore.toFixed(3)})</td>
+    <td><span class="agree-badge ${agreeClass}">${agree?'YES':'NO'}</span></td>
+    <td>${delta}</td>
+  `;
+  tbody.insertBefore(tr, tbody.firstChild);
+  document.getElementById('history-section').style.display = 'block';
+}
+
+document.getElementById('test-btn').addEventListener('click', predict);
+document.getElementById('test-input').addEventListener('keydown', e => { if(e.key==='Enter') predict(); });
+</script>
+</body>
+</html>
