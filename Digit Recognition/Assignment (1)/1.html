@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MNIST CNN</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<style>
+  body { font-family: monospace; background: #111; color: #eee; padding: 2rem; max-width: 600px; margin: auto; }
+  button { background: #00f5c4; color: #111; border: none; padding: 0.6rem 1.5rem; font-family: monospace; font-size: 1rem; cursor: pointer; border-radius: 6px; margin-bottom: 1rem; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #log { background: #000; border: 1px solid #222; border-radius: 8px; padding: 1rem; height: 300px; overflow-y: auto; font-size: 0.82rem; line-height: 1.8; }
+  .ok   { color: #00f5c4; }
+  .info { color: #555; }
+  .warn { color: #ffc94d; }
+</style>
+</head>
+<body>
+
+<h2 style="color:#00f5c4">MNIST CNN — 5 Epochs</h2>
+<button id="btn">▶ Train & Evaluate</button>
+<div id="log"><span class="info">Click the button to start...</span></div>
+
+<script>
+const SPRITE = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png';
+const LABELS = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8';
+
+function log(msg, type='info') {
+  const box = document.getElementById('log');
+  if (box.textContent.trim() === 'Click the button to start...') box.innerHTML = '';
+  const d = document.createElement('div');
+  d.innerHTML = `<span class="${type}">${msg}</span>`;
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
+
+document.getElementById('btn').onclick = async () => {
+  const btn = document.getElementById('btn');
+  btn.disabled = true;
+
+  // ── Load data ──
+  log('Loading MNIST data...', 'info');
+  const [imgSprite, labelBuf] = await Promise.all([
+    new Promise((res, rej) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => res(img);
+      img.onerror = () => rej(new Error('Sprite load failed'));
+      img.src = SPRITE;
+    }),
+    fetch(LABELS).then(r => r.arrayBuffer())
+  ]);
+
+  const labels = new Uint8Array(labelBuf);
+  const c = document.createElement('canvas');
+  c.width = imgSprite.width; c.height = imgSprite.height;
+  c.getContext('2d').drawImage(imgSprite, 0, 0);
+  const pixels = new Float32Array(c.getContext('2d').getImageData(0,0,c.width,c.height).data.length / 4);
+  const raw = c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+  for (let i = 0; i < pixels.length; i++) pixels[i] = raw[i*4] / 255;
+  log('Data loaded — 65000 samples', 'ok');
+
+  // ── Balanced sample: 1000 per class ──
+  const PER = 1000, counts = new Array(10).fill(0), idx = [];
+  for (let i = 0; i < 65000; i++) {
+    let d = -1;
+    for (let c = 0; c < 10; c++) if (labels[i*10+c] === 1) { d = c; break; }
+    if (d >= 0 && counts[d] < PER) { idx.push(i); counts[d]++; }
+    if (idx.length === PER * 10) break;
+  }
+  // shuffle
+  for (let i = idx.length-1; i > 0; i--) {
+    const j = Math.floor(Math.random()*(i+1)); [idx[i],idx[j]]=[idx[j],idx[i]];
+  }
+  const N = idx.length;
+  const xData = new Float32Array(N*784), yData = new Float32Array(N*10);
+  idx.forEach((src,i) => {
+    xData.set(pixels.slice(src*784,(src+1)*784), i*784);
+    yData.set(labels.slice(src*10,(src+1)*10), i*10);
+  });
+  const split = Math.floor(N * 0.9);
+  const xs_train = tf.tensor4d(xData.slice(0, split*784), [split,28,28,1]);
+  const ys_train = tf.tensor2d(yData.slice(0, split*10),  [split,10]);
+  const xs_test  = tf.tensor4d(xData.slice(split*784),    [N-split,28,28,1]);
+  const ys_test  = tf.tensor2d(yData.slice(split*10),     [N-split,10]);
+  log(`Train: ${split} | Test: ${N-split} | Balanced: ${counts.join(',')}`, 'ok');
+
+  // ── Build model ──
+  const model = tf.sequential();
+  model.add(tf.layers.conv2d({inputShape:[28,28,1], filters:32, kernelSize:3, activation:'relu', padding:'same'}));
+  model.add(tf.layers.maxPooling2d({poolSize:2}));
+  model.add(tf.layers.conv2d({filters:64, kernelSize:3, activation:'relu', padding:'same'}));
+  model.add(tf.layers.maxPooling2d({poolSize:2}));
+  model.add(tf.layers.flatten());
+  model.add(tf.layers.dense({units:64, activation:'relu'}));
+  model.add(tf.layers.dropout({rate:0.3}));
+  model.add(tf.layers.dense({units:10, activation:'softmax'}));
+  model.compile({optimizer:'adam', loss:'categoricalCrossentropy', metrics:['accuracy']});
+  log(`Model built — ${model.countParams().toLocaleString()} params`, 'ok');
+
+  // ── Train 5 epochs ──
+  log('Training for 5 epochs...', 'info');
+  await model.fit(xs_train, ys_train, {
+    epochs: 5, batchSize: 128,
+    callbacks: {
+      onEpochEnd: (epoch, logs) => {
+        log(`Epoch ${epoch+1}/5 — loss: ${logs.loss.toFixed(4)} | acc: ${(logs.acc*100).toFixed(2)}%`, 'info');
+      }
+    }
+  });
+
+  // ── Evaluate ──
+  const [loss, acc] = model.evaluate(xs_test, ys_test);
+  const accVal = (await acc.data())[0];
+  const lossVal = (await loss.data())[0];
+  log('─────────────────────────────────', 'info');
+  log(`Test Loss:     ${lossVal.toFixed(4)}`, 'info');
+  log(`Test Accuracy: ${(accVal*100).toFixed(2)}%`, 'ok');
+
+  xs_train.dispose(); ys_train.dispose(); xs_test.dispose(); ys_test.dispose();
+  btn.textContent = '↺ Retrain'; btn.disabled = false;
+};
+</script>
+</body>
+</html>
