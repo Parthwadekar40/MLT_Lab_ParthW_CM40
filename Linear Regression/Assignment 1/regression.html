@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Regression: Predicted vs Actual</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <h2>Predicted vs Actual</h2>
+  <canvas id="chart" width="500" height="400"></canvas>
+  <p id="status"></p>
+
+<script>
+async function main() {
+  // 1. Generate synthetic data: y = 3x + 7 + noise
+  const N = 100;
+  const xData = Array.from({ length: N }, () => Math.random() * 10);
+  const yData = xData.map(x => 3 * x + 7 + (Math.random() - 0.5) * 4);
+
+  const xs = tf.tensor2d(xData, [N, 1]);
+  const ys = tf.tensor2d(yData, [N, 1]);
+
+  // 2. Build model using tf.sequential() and tf.layers.dense()
+  const model = tf.sequential();
+  model.add(tf.layers.dense({ units: 1, inputShape: [1] }));
+  model.compile({ optimizer: 'adam', loss: 'meanSquaredError' });
+
+  // 3. Train
+  await model.fit(xs, ys, { epochs: 100 });
+
+  // 4. Predict
+  const predicted = Array.from(model.predict(xs).dataSync());
+
+  // 5. Plot predicted vs actual
+  new Chart(document.getElementById('chart'), {
+    type: 'scatter',
+    data: {
+      datasets: [
+        {
+          label: 'Predicted vs Actual',
+          data: yData.map((actual, i) => ({ x: actual, y: predicted[i] })),
+          backgroundColor: 'rgba(99, 102, 241, 0.6)'
+        },
+        {
+          label: 'Perfect Fit (y = x)',
+          type: 'line',
+          data: [
+            { x: Math.min(...yData), y: Math.min(...yData) },
+            { x: Math.max(...yData), y: Math.max(...yData) }
+          ],
+          borderColor: 'red',
+          borderDash: [6, 4],
+          pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      scales: {
+        x: { title: { display: true, text: 'Actual' } },
+        y: { title: { display: true, text: 'Predicted' } }
+      }
+    }
+  });
+
+  document.getElementById('status').textContent = 'Training complete!';
+  console.log('Predicted (first 5):', predicted.slice(0, 5));
+  console.log('Actual    (first 5):', yData.slice(0, 5));
+}
+
+main();
+</script>
+</body>
+</html>

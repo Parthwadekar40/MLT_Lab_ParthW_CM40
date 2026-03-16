@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Predict Unseen Inputs</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 860px; margin: auto; }
+    h2 { margin-bottom: 4px; }
+    p.sub { color: #666; font-size: 14px; margin-bottom: 20px; }
+    #status { font-family: monospace; font-size: 13px; color: #888; margin: 10px 0; }
+    canvas { margin-top: 16px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 14px; }
+    th, td { border: 1px solid #ddd; padding: 8px 14px; text-align: center; }
+    th { background: #f5f5f5; }
+    .good { color: #27ae60; font-weight: bold; }
+    .bad  { color: #e74c3c; font-weight: bold; }
+    .section { margin-top: 28px; font-size: 15px; font-weight: bold; color: #333; }
+  </style>
+</head>
+<body>
+
+<h2>Predict Unseen Inputs</h2>
+<p class="sub">Model trained on x = 0–8. Unseen inputs x = 9, 10, 11, 12 are predicted and compared with expected values.</p>
+<p id="status">Training...</p>
+
+<div class="section">Loss Curve (Training)</div>
+<div style="position:relative; height:220px;">
+  <canvas id="lossChart"></canvas>
+</div>
+
+<div class="section">Predicted vs Expected (Unseen Inputs)</div>
+<div style="position:relative; height:280px;">
+  <canvas id="predChart"></canvas>
+</div>
+
+<div class="section">Comparison Table</div>
+<table>
+  <thead>
+    <tr><th>Input (x)</th><th>Expected (y = 4x + 2)</th><th>Predicted</th><th>Error</th><th>% Error</th></tr>
+  </thead>
+  <tbody id="tableBody"></tbody>
+</table>
+
+<script>
+// True function: y = 4x + 2
+const trueFunc = x => 4 * x + 2;
+
+// Training data: x in [0, 8]
+const N = 80;
+const xTrain = Array.from({ length: N }, () => Math.random() * 8);
+const yTrain = xTrain.map(x => trueFunc(x) + (Math.random() - 0.5) * 3);
+
+// Unseen test inputs
+const xTest = [9, 10, 11, 12];
+const yExpected = xTest.map(trueFunc);
+
+async function main() {
+  const xs = tf.tensor2d(xTrain, [N, 1]);
+  const ys = tf.tensor2d(yTrain, [N, 1]);
+
+  // Build model
+  const model = tf.sequential();
+  model.add(tf.layers.dense({ units: 16, inputShape: [1], activation: 'relu' }));
+  model.add(tf.layers.dense({ units: 1 }));
+  model.compile({ optimizer: tf.train.adam(0.01), loss: 'meanSquaredError' });
+
+  // Train
+  const lossHistory = [];
+  await model.fit(xs, ys, {
+    epochs: 150,
+    callbacks: {
+      onEpochEnd: async (epoch, logs) => {
+        lossHistory.push(parseFloat(logs.loss.toFixed(4)));
+        if (epoch % 30 === 0)
+          document.getElementById('status').textContent = `Epoch ${epoch + 1}/150 — loss: ${logs.loss.toFixed(4)}`;
+      }
+    }
+  });
+
+  document.getElementById('status').textContent = 'Training complete!';
+
+  // Predict unseen inputs
+  const xTestTensor = tf.tensor2d(xTest, [xTest.length, 1]);
+  const yPred = Array.from(model.predict(xTestTensor).dataSync());
+
+  console.log('Unseen Inputs | Expected vs Predicted:');
+  xTest.forEach((x, i) => {
+    const err = Math.abs(yExpected[i] - yPred[i]);
+    const pct = ((err / yExpected[i]) * 100).toFixed(2);
+    console.log(`x=${x} | expected=${yExpected[i].toFixed(2)} | predicted=${yPred[i].toFixed(2)} | error=${err.toFixed(2)} (${pct}%)`);
+  });
+
+  // Loss curve
+  new Chart(document.getElementById('lossChart'), {
+    type: 'line',
+    data: {
+      labels: Array.from({ length: lossHistory.length }, (_, i) => i + 1),
+      datasets: [{
+        label: 'Training Loss',
+        data: lossHistory,
+        borderColor: '#3498db',
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { title: { display: true, text: 'Epoch' } },
+        y: { title: { display: true, text: 'MSE Loss' } }
+      }
+    }
+  });
+
+  // Predicted vs Expected bar chart
+  new Chart(document.getElementById('predChart'), {
+    type: 'bar',
+    data: {
+      labels: xTest.map(x => `x = ${x}`),
+      datasets: [
+        {
+          label: 'Expected',
+          data: yExpected.map(v => parseFloat(v.toFixed(2))),
+          backgroundColor: 'rgba(46, 204, 113, 0.7)',
+          borderColor: '#27ae60',
+          borderWidth: 1
+        },
+        {
+          label: 'Predicted',
+          data: yPred.map(v => parseFloat(v.toFixed(2))),
+          backgroundColor: 'rgba(52, 152, 219, 0.7)',
+          borderColor: '#2980b9',
+          borderWidth: 1
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' } },
+      scales: {
+        x: { title: { display: true, text: 'Unseen Input' } },
+        y: { title: { display: true, text: 'Output Value' } }
+      }
+    }
+  });
+
+  // Table
+  const tbody = document.getElementById('tableBody');
+  xTest.forEach((x, i) => {
+    const err = Math.abs(yExpected[i] - yPred[i]);
+    const pct = ((err / yExpected[i]) * 100).toFixed(2);
+    const cls = parseFloat(pct) < 5 ? 'good' : 'bad';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${x}</td>
+      <td>${yExpected[i].toFixed(2)}</td>
+      <td>${yPred[i].toFixed(2)}</td>
+      <td class="${cls}">${err.toFixed(2)}</td>
+      <td class="${cls}">${pct}%</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  xs.dispose(); ys.dispose(); xTestTensor.dispose(); model.dispose();
+}
+
+main();
+</script>
+</body>
+</html>

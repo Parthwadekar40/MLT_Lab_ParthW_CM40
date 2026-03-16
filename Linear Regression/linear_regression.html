@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linear Regression · TensorFlow.js</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --border: #1e1e2e;
+    --accent: #7c3aed;
+    --glow: #a855f7;
+    --green: #22d3a5;
+    --text: #e2e8f0;
+    --muted: #64748b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+  }
+  h1 {
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    font-weight: 800;
+    letter-spacing: -1px;
+    background: linear-gradient(135deg, #a855f7, #22d3a5);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 4px;
+  }
+  .sub { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; margin-bottom: 32px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    width: 100%;
+    max-width: 760px;
+    margin-bottom: 20px;
+  }
+
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  label { font-size: 0.72rem; color: var(--muted); font-family: 'JetBrains Mono', monospace; display: block; margin-bottom: 6px; text-transform: uppercase; }
+  input[type=range] {
+    width: 100%; accent-color: var(--accent);
+    background: transparent; cursor: pointer;
+  }
+  .val { font-size: 1rem; font-weight: 700; color: var(--glow); font-family: 'JetBrains Mono', monospace; }
+
+  button {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, var(--accent), #9333ea);
+    border: none;
+    border-radius: 10px;
+    color: #fff;
+    font-family: 'Syne', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    transition: opacity 0.2s, transform 0.1s;
+    margin-bottom: 20px;
+  }
+  button:hover { opacity: 0.88; transform: translateY(-1px); }
+  button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  canvas {
+    width: 100% !important;
+    height: 320px !important;
+    border-radius: 10px;
+    background: #0d0d14;
+    display: block;
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .stat {
+    background: #0d0d14;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    text-align: center;
+  }
+  .stat-label { font-size: 0.68rem; color: var(--muted); font-family: 'JetBrains Mono', monospace; text-transform: uppercase; margin-bottom: 4px; }
+  .stat-val { font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--green); }
+
+  .log {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--muted);
+    max-height: 80px;
+    overflow-y: auto;
+    margin-top: 16px;
+    line-height: 1.6;
+  }
+  .log span { color: var(--green); }
+</style>
+</head>
+<body>
+
+<h1>Linear Regression</h1>
+<p class="sub">tf.sequential() · tf.layers.dense() · synthetic data</p>
+
+<div class="card">
+  <div class="controls">
+    <div>
+      <label>Points <span class="val" id="nVal">80</span></label>
+      <input type="range" id="nPts" min="20" max="200" value="80">
+    </div>
+    <div>
+      <label>Epochs <span class="val" id="eVal">60</span></label>
+      <input type="range" id="epochs" min="10" max="200" value="60">
+    </div>
+    <div>
+      <label>Noise <span class="val" id="noiseVal">0.3</span></label>
+      <input type="range" id="noise" min="0" max="1" step="0.05" value="0.3">
+    </div>
+  </div>
+  <button id="trainBtn" onclick="run()">▶ Train Model</button>
+  <canvas id="chart"></canvas>
+  <div class="stats">
+    <div class="stat"><div class="stat-label">Final Loss</div><div class="stat-val" id="loss">—</div></div>
+    <div class="stat"><div class="stat-label">Slope (w)</div><div class="stat-val" id="slope">—</div></div>
+    <div class="stat"><div class="stat-label">Intercept (b)</div><div class="stat-val" id="intercept">—</div></div>
+  </div>
+  <div class="log" id="log">Ready. Press Train Model to begin.</div>
+</div>
+
+<script>
+  // Bind slider display
+  const bind = (id, outId, fmt) => {
+    const el = document.getElementById(id), out = document.getElementById(outId);
+    el.oninput = () => out.textContent = fmt ? parseFloat(el.value).toFixed(2) : el.value;
+  };
+  bind('nPts','nVal'); bind('epochs','eVal'); bind('noise','noiseVal',true);
+
+  const canvas = document.getElementById('chart');
+  const ctx = canvas.getContext('2d');
+
+  function resize() { canvas.width = canvas.offsetWidth; canvas.height = 320; }
+  resize(); window.onresize = resize;
+
+  function genData(n, noise) {
+    const xs = [], ys = [];
+    for (let i = 0; i < n; i++) {
+      const x = (Math.random() * 2) - 1;
+      xs.push(x);
+      ys.push(2 * x + 0.5 + (Math.random() - 0.5) * noise * 3);
+    }
+    return { xs, ys };
+  }
+
+  function drawChart(xs, ys, lineXs, lineYs, lossHistory) {
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const pad = 48;
+    const plotW = W - pad * 2, plotH = H - pad * 2 - 50;
+
+    const allX = [...xs, ...lineXs], allY = [...ys, ...lineYs];
+    const minX = Math.min(...allX), maxX = Math.max(...allX);
+    const minY = Math.min(...allY), maxY = Math.max(...allY);
+
+    const px = x => pad + ((x - minX) / (maxX - minX)) * plotW;
+    const py = y => pad + ((maxY - y) / (maxY - minY)) * plotH;
+
+    // Axes
+    ctx.strokeStyle = '#1e1e2e'; ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad + (i / 4) * plotH;
+      ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(pad + plotW, y); ctx.stroke();
+    }
+
+    // Scatter
+    xs.forEach((x, i) => {
+      ctx.beginPath();
+      ctx.arc(px(x), py(ys[i]), 4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(168,85,247,0.55)';
+      ctx.fill();
+      ctx.strokeStyle = '#a855f7'; ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+
+    // Regression line
+    if (lineXs.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(px(lineXs[0]), py(lineYs[0]));
+      for (let i = 1; i < lineXs.length; i++) ctx.lineTo(px(lineXs[i]), py(lineYs[i]));
+      ctx.strokeStyle = '#22d3a5'; ctx.lineWidth = 2.5;
+      ctx.shadowColor = '#22d3a5'; ctx.shadowBlur = 8;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    // Loss mini-chart
+    if (lossHistory.length > 1) {
+      const lTop = pad + plotH + 14, lH = 28, lW = plotW;
+      const maxL = Math.max(...lossHistory), minL = Math.min(...lossHistory);
+      ctx.beginPath();
+      lossHistory.forEach((l, i) => {
+        const lx = pad + (i / (lossHistory.length - 1)) * lW;
+        const ly = lTop + lH - ((l - minL) / (maxL - minL + 1e-9)) * lH;
+        i === 0 ? ctx.moveTo(lx, ly) : ctx.lineTo(lx, ly);
+      });
+      ctx.strokeStyle = '#7c3aed'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.font = '10px JetBrains Mono'; ctx.fillStyle = '#64748b';
+      ctx.fillText('loss', pad, lTop - 2);
+    }
+  }
+
+  function log(msg) {
+    console.log(msg);
+    const el = document.getElementById('log');
+    el.innerHTML += `<span>${msg}</span><br>`;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  async function run() {
+    const btn = document.getElementById('trainBtn');
+    btn.disabled = true;
+    document.getElementById('log').innerHTML = '';
+    log('Generating synthetic data...');
+
+    const n = +document.getElementById('nPts').value;
+    const epochs = +document.getElementById('epochs').value;
+    const noise = +document.getElementById('noise').value;
+
+    const { xs, ys } = genData(n, noise);
+    drawChart(xs, ys, [], [], []);
+
+    const xTensor = tf.tensor1d(xs);
+    const yTensor = tf.tensor1d(ys);
+
+    const model = tf.sequential();
+    model.add(tf.layers.dense({ units: 1, inputShape: [1] }));
+    model.compile({ optimizer: tf.train.adam(0.1), loss: 'meanSquaredError' });
+
+    log('Model compiled. Training...');
+
+    const lossHistory = [];
+
+    await model.fit(xTensor, yTensor, {
+      epochs,
+      batchSize: 32,
+      callbacks: {
+        onEpochEnd: async (epoch, logs) => {
+          lossHistory.push(logs.loss);
+          console.log(`Epoch ${epoch + 1}/${epochs} | Loss: ${logs.loss.toFixed(4)}`);
+          if (epoch % Math.max(1, Math.floor(epochs / 10)) === 0 || epoch === epochs - 1) {
+            const [w, b] = model.layers[0].getWeights();
+            const wv = w.dataSync()[0], bv = b.dataSync()[0];
+            const lineXs = [-1.2, 1.2];
+            const lineYs = lineXs.map(x => wv * x + bv);
+            drawChart(xs, ys, lineXs, lineYs, lossHistory);
+            log(`Epoch ${epoch + 1}/${epochs} · loss: ${logs.loss.toFixed(4)}`);
+            await tf.nextFrame();
+          }
+        }
+      }
+    });
+
+    const [w, b] = model.layers[0].getWeights();
+    const wv = w.dataSync()[0], bv = b.dataSync()[0];
+    document.getElementById('loss').textContent = lossHistory[lossHistory.length - 1].toFixed(4);
+    document.getElementById('slope').textContent = wv.toFixed(3);
+    document.getElementById('intercept').textContent = bv.toFixed(3);
+    log(`Done! w=${wv.toFixed(3)}, b=${bv.toFixed(3)}`);
+
+    xTensor.dispose(); yTensor.dispose(); model.dispose();
+    btn.disabled = false;
+  }
+</script>
+</body>
+</html>

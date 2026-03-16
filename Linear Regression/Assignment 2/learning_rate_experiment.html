@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Learning Rate Experiment</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 900px; margin: auto; }
+    h2 { margin-bottom: 4px; }
+    p { color: #555; font-size: 14px; }
+    canvas { margin-top: 20px; }
+    #status { font-size: 13px; color: #888; margin-top: 8px; font-family: monospace; }
+    table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 14px; }
+    th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: center; }
+    th { background: #f4f4f4; }
+    td.best { color: green; font-weight: bold; }
+    td.worst { color: red; }
+  </style>
+</head>
+<body>
+  <h2>Learning Rate vs Convergence</h2>
+  <p>Trains the same model on synthetic data with different learning rates. Each line shows loss over epochs.</p>
+  <div style="position:relative; height:380px;">
+    <canvas id="chart"></canvas>
+  </div>
+  <p id="status">Training...</p>
+  <table id="summary">
+    <thead>
+      <tr><th>Learning Rate</th><th>Final Loss</th><th>Converged Fast?</th></tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+
+<script>
+const LEARNING_RATES = [0.0001, 0.001, 0.01, 0.1, 0.5];
+const EPOCHS = 80;
+const COLORS = ['#e74c3c', '#e67e22', '#2ecc71', '#3498db', '#9b59b6'];
+const N = 150;
+
+// Synthetic data: y = 4x + 2 + noise
+const xData = Array.from({ length: N }, () => Math.random() * 10);
+const yData = xData.map(x => 4 * x + 2 + (Math.random() - 0.5) * 5);
+const xs = tf.tensor2d(xData, [N, 1]);
+const ys = tf.tensor2d(yData, [N, 1]);
+
+async function trainWithLR(lr) {
+  const model = tf.sequential();
+  model.add(tf.layers.dense({ units: 1, inputShape: [1] }));
+  model.compile({ optimizer: tf.train.adam(lr), loss: 'meanSquaredError' });
+
+  const lossHistory = [];
+  await model.fit(xs, ys, {
+    epochs: EPOCHS,
+    callbacks: {
+      onEpochEnd: async (epoch, logs) => {
+        lossHistory.push(parseFloat(logs.loss.toFixed(4)));
+      }
+    }
+  });
+  model.dispose();
+  return lossHistory;
+}
+
+async function main() {
+  const results = [];
+
+  for (let i = 0; i < LEARNING_RATES.length; i++) {
+    const lr = LEARNING_RATES[i];
+    document.getElementById('status').textContent = `Training lr=${lr}...`;
+    const history = await trainWithLR(lr);
+    results.push({ lr, history, finalLoss: history[history.length - 1] });
+    console.log(`lr=${lr} | Final Loss: ${history[history.length - 1]}`);
+  }
+
+  document.getElementById('status').textContent = 'All done!';
+  xs.dispose(); ys.dispose();
+
+  // Plot loss curves
+  new Chart(document.getElementById('chart'), {
+    type: 'line',
+    data: {
+      labels: Array.from({ length: EPOCHS }, (_, i) => i + 1),
+      datasets: results.map((r, i) => ({
+        label: `lr = ${r.lr}`,
+        data: r.history,
+        borderColor: COLORS[i],
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3
+      }))
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' } },
+      scales: {
+        x: { title: { display: true, text: 'Epoch' } },
+        y: { title: { display: true, text: 'Loss (MSE)' }, type: 'logarithmic' }
+      }
+    }
+  });
+
+  // Summary table
+  const minLoss = Math.min(...results.map(r => r.finalLoss));
+  const maxLoss = Math.max(...results.map(r => r.finalLoss));
+  const tbody = document.getElementById('tableBody');
+  results.forEach(r => {
+    const tr = document.createElement('tr');
+    const convergedFast = r.history[20] < r.history[0] * 0.5 ? '✅ Yes' : '❌ No';
+    tr.innerHTML = `
+      <td>${r.lr}</td>
+      <td class="${r.finalLoss === minLoss ? 'best' : r.finalLoss === maxLoss ? 'worst' : ''}">${r.finalLoss}</td>
+      <td>${convergedFast}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+main();
+</script>
+</body>
+</html>
