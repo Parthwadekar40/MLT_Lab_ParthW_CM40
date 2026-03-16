@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MobileNet vs EfficientNet — Model Comparator</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/efficientnet@0.0.5/dist/efficientnet.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:      #0f1117;
+  --surface: #181c27;
+  --card:    #1e2333;
+  --border:  #2a3050;
+  --mob:     #38bdf8;   /* MobileNet  — sky blue  */
+  --eff:     #a78bfa;   /* EfficientNet — violet  */
+  --agree:   #34d399;   /* agreement   — emerald  */
+  --disagree:#f87171;   /* disagreement — red     */
+  --text:    #e2e8f0;
+  --muted:   #64748b;
+  --mono:    'IBM Plex Mono', monospace;
+  --body:    'Outfit', sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--body);
+  min-height: 100vh;
+  padding: 40px 16px 80px;
+}
+
+/* ── subtle dot-grid bg ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: radial-gradient(circle, #ffffff08 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none; z-index: 0;
+}
+
+.wrap { position: relative; z-index: 1; max-width: 980px; margin: 0 auto; }
+
+/* ── HEADER ── */
+header { margin-bottom: 36px; }
+.eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .18em;
+  color: var(--muted); text-transform: uppercase; margin-bottom: 10px;
+}
+h1 {
+  font-size: clamp(1.6rem, 4vw, 2.6rem); font-weight: 700; line-height: 1.1;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+}
+.pill {
+  font-size: 13px; font-weight: 600; padding: 4px 12px; border-radius: 999px;
+  font-family: var(--mono);
+}
+.pill.mob { background: #0c3050; color: var(--mob); border: 1px solid var(--mob); }
+.pill.eff { background: #2d1f50; color: var(--eff); border: 1px solid var(--eff); }
+.vs { color: var(--muted); font-size: 1rem; }
+.tagline { font-size: 14px; color: var(--muted); font-weight: 300; margin-top: 8px; }
+
+/* ── STATUS ── */
+#status-wrap {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 28px;
+}
+.status-chip {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 8px 14px; border-radius: 6px;
+  font-family: var(--mono); font-size: 12px; color: var(--muted);
+  transition: border-color .3s, color .3s;
+  flex: 1; min-width: 200px;
+}
+.status-chip.loading { border-color: var(--mob); color: var(--mob); }
+.status-chip.ready   { border-color: var(--agree); color: var(--agree); }
+.status-chip.error   { border-color: var(--disagree); color: var(--disagree); }
+.status-chip .dot {
+  width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0;
+}
+.loading .dot { animation: blink 1.2s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.15} }
+
+/* ── UPLOAD ── */
+#drop-zone {
+  border: 1.5px dashed var(--border);
+  border-radius: 10px; background: var(--surface);
+  padding: 40px; text-align: center; cursor: pointer;
+  transition: border-color .2s, background .2s;
+  position: relative; margin-bottom: 20px;
+}
+#drop-zone:hover, #drop-zone.over {
+  border-color: var(--mob); background: #0c2233;
+}
+#drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+#drop-zone .ico { font-size: 34px; margin-bottom: 10px; }
+#drop-zone p { color: var(--muted); font-size: 14px; }
+#drop-zone p strong { color: var(--mob); }
+
+/* ── PREVIEW ROW ── */
+#preview-row {
+  display: none;
+  align-items: flex-start; gap: 20px;
+  margin-bottom: 20px; flex-wrap: wrap;
+}
+#preview-img {
+  width: 180px; height: 180px; object-fit: cover;
+  border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0;
+  background: var(--card);
+}
+.preview-meta { flex: 1; min-width: 160px; }
+.preview-meta .fname {
+  font-family: var(--mono); font-size: 12px; color: var(--muted); margin-bottom: 8px;
+  word-break: break-all;
+}
+#run-btn {
+  margin-top: 12px; padding: 12px 28px;
+  background: var(--mob); color: #000; border: none;
+  border-radius: 7px; font-family: var(--body); font-size: 14px; font-weight: 700;
+  cursor: pointer; transition: background .2s, transform .1s;
+  width: 100%;
+}
+#run-btn:hover:not(:disabled) { background: #7dd3fc; }
+#run-btn:disabled { opacity: .35; cursor: not-allowed; }
+#run-btn:active:not(:disabled) { transform: scale(.97); }
+
+/* ── TIMING ROW ── */
+#timing-row {
+  display: none;
+  gap: 10px; margin-bottom: 24px; flex-wrap: wrap;
+}
+.time-chip {
+  flex: 1; min-width: 140px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 7px; padding: 12px 16px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.time-chip .t-label { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.time-chip .t-val   { font-size: 22px; font-weight: 700; font-family: var(--mono); }
+.time-chip.mob-chip .t-val { color: var(--mob); }
+.time-chip.eff-chip .t-val { color: var(--eff); }
+.time-chip.diff-chip .t-val { color: var(--agree); }
+
+/* ── COMPARE GRID ── */
+#compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px; margin-bottom: 28px;
+}
+@media(max-width:600px){ #compare-grid{ grid-template-columns:1fr; } }
+
+.model-col { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.col-header {
+  padding: 12px 16px; display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.col-header .model-name { font-size: 14px; font-weight: 700; font-family: var(--mono); }
+.col-header .model-tag  { font-size: 11px; color: var(--muted); }
+.mob-col .col-header { background: #0a1e30; }
+.eff-col .col-header { background: #1a1030; }
+.mob-col .model-name { color: var(--mob); }
+.eff-col .model-name { color: var(--eff); }
+
+.col-body { padding: 14px 16px; min-height: 120px; }
+
+.pred-item {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px; font-size: 13px; opacity: 0;
+  animation: fadeUp .35s ease forwards;
+}
+.pred-item:nth-child(1){ animation-delay:.05s }
+.pred-item:nth-child(2){ animation-delay:.15s }
+.pred-item:nth-child(3){ animation-delay:.25s }
+@keyframes fadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+
+.pred-num { font-family: var(--mono); font-size: 11px; color: var(--muted); width: 18px; flex-shrink:0; }
+.pred-lbl { flex: 1; font-weight: 500; text-transform: capitalize; }
+.pred-pct { font-family: var(--mono); font-size: 12px; color: var(--muted); width: 42px; text-align:right; flex-shrink:0; }
+.bar-wrap { width: 70px; flex-shrink: 0; }
+.bar-bg   { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 3px; transition: width .6s cubic-bezier(.4,0,.2,1); }
+.mob-col .bar-fill { background: var(--mob); }
+.eff-col .bar-fill { background: var(--eff); }
+
+.placeholder-msg {
+  font-size: 13px; color: var(--muted); font-family: var(--mono);
+  display: flex; align-items: center; justify-content: center;
+  height: 90px;
+}
+
+/* ── AGREEMENT PANEL ── */
+#agreement-panel {
+  display: none;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px 22px; margin-bottom: 24px;
+}
+#agreement-panel h3 {
+  font-size: 13px; font-family: var(--mono); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .1em; margin-bottom: 14px;
+}
+.agree-row { display: flex; gap: 20px; flex-wrap: wrap; }
+.agree-stat { display: flex; flex-direction: column; gap: 2px; }
+.agree-stat .av { font-size: 26px; font-weight: 700; }
+.agree-stat .al { font-size: 12px; color: var(--muted); }
+.agree-tag {
+  display: inline-block; font-size: 12px; font-weight: 600;
+  padding: 3px 10px; border-radius: 999px; font-family: var(--mono);
+  margin-top: 2px;
+}
+.agree-tag.yes { background: #052e1b; color: var(--agree); border: 1px solid var(--agree); }
+.agree-tag.no  { background: #2a0f0f; color: var(--disagree); border: 1px solid var(--disagree); }
+
+/* ── HISTORY TABLE ── */
+#history-section { display: none; }
+#history-section h3 {
+  font-size: 13px; font-family: var(--mono); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .1em; margin-bottom: 12px;
+}
+.hist-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.hist-table th {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
+  text-transform: uppercase; letter-spacing: .08em;
+}
+.hist-table td {
+  padding: 10px 10px; border-bottom: 1px solid #1e2333; vertical-align: middle;
+}
+.hist-table tr:last-child td { border-bottom: none; }
+.hist-table .thumb {
+  width: 36px; height: 36px; object-fit: cover;
+  border-radius: 4px; border: 1px solid var(--border);
+}
+.match-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  display: inline-block; margin: 0 auto;
+}
+.match-dot.yes { background: var(--agree); }
+.match-dot.no  { background: var(--disagree); }
+td.center { text-align: center; }
+
+#clear-btn {
+  margin-top: 20px; padding: 9px 20px;
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 6px;
+  font-size: 13px; cursor: pointer; transition: border-color .2s, color .2s;
+}
+#clear-btn:hover { border-color: var(--disagree); color: var(--disagree); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HEADER -->
+  <header>
+    <div class="eyebrow">// TensorFlow.js · Browser Inference</div>
+    <h1>
+      <span class="pill mob">MobileNet v2</span>
+      <span class="vs">vs</span>
+      <span class="pill eff">EfficientNet-Lite</span>
+    </h1>
+    <p class="tagline">Upload an image — both models run in parallel and predictions are compared side-by-side.</p>
+  </header>
+
+  <!-- STATUS -->
+  <div id="status-wrap">
+    <div class="status-chip loading" id="mob-status">
+      <div class="dot"></div><span id="mob-status-txt">Loading MobileNet v2…</span>
+    </div>
+    <div class="status-chip loading" id="eff-status">
+      <div class="dot"></div><span id="eff-status-txt">Loading EfficientNet-Lite0…</span>
+    </div>
+  </div>
+
+  <!-- UPLOAD -->
+  <div id="drop-zone">
+    <input type="file" id="file-input" accept="image/*"/>
+    <div class="ico">🖼</div>
+    <p><strong>Click to upload</strong> or drag & drop an image</p>
+    <p style="font-size:12px;margin-top:6px;color:#475569;">PNG · JPG · WEBP</p>
+  </div>
+
+  <!-- PREVIEW -->
+  <div id="preview-row">
+    <img id="preview-img" alt="preview"/>
+    <div class="preview-meta">
+      <div class="fname" id="fname">—</div>
+      <button id="run-btn" disabled>⚡ Run Both Models</button>
+    </div>
+  </div>
+
+  <!-- TIMING -->
+  <div id="timing-row" style="display:none;display:flex;">
+    <div class="time-chip mob-chip">
+      <div class="t-label">MobileNet time</div>
+      <div class="t-val" id="mob-time">—</div>
+    </div>
+    <div class="time-chip eff-chip">
+      <div class="t-label">EfficientNet time</div>
+      <div class="t-val" id="eff-time">—</div>
+    </div>
+    <div class="time-chip diff-chip">
+      <div class="t-label">Speed difference</div>
+      <div class="t-val" id="time-diff">—</div>
+    </div>
+  </div>
+
+  <!-- SIDE-BY-SIDE PREDICTIONS -->
+  <div id="compare-grid">
+    <div class="model-col mob-col">
+      <div class="col-header">
+        <div>
+          <div class="model-name">MobileNet v2</div>
+          <div class="model-tag">3.4M params · ImageNet</div>
+        </div>
+      </div>
+      <div class="col-body" id="mob-preds">
+        <div class="placeholder-msg">awaiting image…</div>
+      </div>
+    </div>
+    <div class="model-col eff-col">
+      <div class="col-header">
+        <div>
+          <div class="model-name">EfficientNet-Lite0</div>
+          <div class="model-tag">4.7M params · ImageNet</div>
+        </div>
+      </div>
+      <div class="col-body" id="eff-preds">
+        <div class="placeholder-msg">awaiting image…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AGREEMENT PANEL -->
+  <div id="agreement-panel">
+    <h3>// Prediction Agreement</h3>
+    <div class="agree-row">
+      <div class="agree-stat">
+        <div class="av" id="ag-top1" style="color:var(--agree)">—</div>
+        <div class="al">Top-1 label</div>
+        <div id="ag-top1-tag"></div>
+      </div>
+      <div class="agree-stat">
+        <div class="av" id="ag-top1-conf" style="color:var(--mob)">—</div>
+        <div class="al">MobileNet confidence</div>
+      </div>
+      <div class="agree-stat">
+        <div class="av" id="ag-eff-conf" style="color:var(--eff)">—</div>
+        <div class="al">EfficientNet confidence</div>
+      </div>
+      <div class="agree-stat">
+        <div class="av" id="ag-conf-delta" style="color:var(--text)">—</div>
+        <div class="al">Confidence delta</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HISTORY TABLE -->
+  <div id="history-section">
+    <h3>// Run History</h3>
+    <table class="hist-table">
+      <thead>
+        <tr>
+          <th>Image</th>
+          <th>MobileNet #1</th>
+          <th>EfficientNet #1</th>
+          <th style="text-align:center">Agree?</th>
+          <th>Mob ms</th>
+          <th>Eff ms</th>
+        </tr>
+      </thead>
+      <tbody id="hist-body"></tbody>
+    </table>
+    <button id="clear-btn">✕ Clear History</button>
+  </div>
+
+</div><!-- /wrap -->
+
+<script>
+let mobModel = null, effModel = null;
+let history = [];
+
+const $ = id => document.getElementById(id);
+
+// ── Load both models in parallel ────────────────────────────────────────────
+Promise.all([
+  mobilenet.load({ version: 2, alpha: 1.0 }).then(m => {
+    mobModel = m;
+    setChip('mob', 'ready', '✅ MobileNet v2 ready');
+    updateRunBtn();
+  }).catch(e => setChip('mob', 'error', '❌ MobileNet failed: ' + e.message)),
+
+  efficientnet.load(efficientnet.EfficientNetCheckpoint.b0).then(m => {
+    effModel = m;
+    setChip('eff', 'ready', '✅ EfficientNet-Lite0 ready');
+    updateRunBtn();
+  }).catch(e => setChip('eff', 'error', '❌ EfficientNet failed: ' + e.message))
+]);
+
+function setChip(which, cls, msg) {
+  const chip = $(which + '-status');
+  chip.className = 'status-chip ' + cls;
+  chip.querySelector('span').textContent = msg;
+}
+
+// ── File input ───────────────────────────────────────────────────────────────
+const dropZone = $('drop-zone');
+const fileInput = $('file-input');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('over');
+  const f = [...e.dataTransfer.files].find(f => f.type.startsWith('image/'));
+  if (f) loadFile(f);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); });
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    $('preview-img').src = e.target.result;
+    $('preview-row').style.display = 'flex';
+    $('fname').textContent = file.name;
+    resetResults();
+    updateRunBtn();
+  };
+  reader.readAsDataURL(file);
+}
+
+function updateRunBtn() {
+  $('run-btn').disabled = !(mobModel && effModel && $('preview-img').src && $('preview-img').src !== window.location.href);
+}
+
+function resetResults() {
+  $('mob-preds').innerHTML = '<div class="placeholder-msg">awaiting run…</div>';
+  $('eff-preds').innerHTML = '<div class="placeholder-msg">awaiting run…</div>';
+  $('agreement-panel').style.display = 'none';
+  $('timing-row').style.display = 'none';
+}
+
+// ── Run both models ──────────────────────────────────────────────────────────
+$('run-btn').addEventListener('click', async () => {
+  const img = $('preview-img');
+  if (!mobModel || !effModel || !img.src) return;
+
+  $('run-btn').disabled = true;
+  $('mob-preds').innerHTML = '<div class="placeholder-msg">running…</div>';
+  $('eff-preds').innerHTML = '<div class="placeholder-msg">running…</div>';
+
+  // Run sequentially to avoid GPU contention, time each separately
+  const t0 = performance.now();
+  const mobPreds = await mobModel.classify(img, 3);
+  const mobMs = (performance.now() - t0).toFixed(0);
+
+  const t1 = performance.now();
+  const effPreds = await effModel.classify(img, 3);
+  const effMs = (performance.now() - t1).toFixed(0);
+
+  // Render predictions
+  renderPreds('mob-preds', mobPreds, 'mob');
+  renderPreds('eff-preds', effPreds, 'eff');
+
+  // Timing row
+  $('mob-time').textContent = mobMs + ' ms';
+  $('eff-time').textContent = effMs + ' ms';
+  const faster = mobMs < effMs ? `MobileNet faster by ${effMs - mobMs}ms` : `EfficientNet faster by ${mobMs - effMs}ms`;
+  $('time-diff').textContent = faster;
+  $('timing-row').style.display = 'flex';
+
+  // Agreement panel
+  showAgreement(mobPreds, effPreds);
+
+  // History
+  addHistory($('preview-img').src, mobPreds, effPreds, mobMs, effMs);
+
+  $('run-btn').disabled = false;
+});
+
+function renderPreds(containerId, preds, which) {
+  const box = $(containerId);
+  box.innerHTML = preds.map((p, i) => {
+    const pct = (p.probability * 100).toFixed(1);
+    const lbl = p.className.split(',')[0].trim();
+    return `
+      <div class="pred-item">
+        <span class="pred-num">#${i+1}</span>
+        <span class="pred-lbl">${lbl}</span>
+        <div class="bar-wrap"><div class="bar-bg">
+          <div class="bar-fill" style="width:0%" data-w="${pct}%"></div>
+        </div></div>
+        <span class="pred-pct">${pct}%</span>
+      </div>`;
+  }).join('');
+  requestAnimationFrame(() => {
+    box.querySelectorAll('.bar-fill').forEach(b => b.style.width = b.dataset.w);
+  });
+}
+
+function normLabel(s) { return s.split(',')[0].trim().toLowerCase(); }
+
+function showAgreement(mobPreds, effPreds) {
+  const mob1 = normLabel(mobPreds[0].className);
+  const eff1 = normLabel(effPreds[0].className);
+  const agree = mob1 === eff1 ||
+    mob1.includes(eff1) || eff1.includes(mob1);
+
+  $('ag-top1').textContent = mob1;
+  $('ag-top1-conf').textContent = (mobPreds[0].probability * 100).toFixed(1) + '%';
+  $('ag-eff-conf').textContent  = (effPreds[0].probability * 100).toFixed(1) + '%';
+  const delta = Math.abs(mobPreds[0].probability - effPreds[0].probability);
+  $('ag-conf-delta').textContent = (delta * 100).toFixed(1) + '%';
+
+  const tag = $('ag-top1-tag');
+  tag.innerHTML = agree
+    ? `<span class="agree-tag yes">✓ Both models agree</span>`
+    : `<span class="agree-tag no">✗ Models disagree — EfficientNet says "${eff1}"</span>`;
+
+  $('agreement-panel').style.display = 'block';
+}
+
+function addHistory(src, mobPreds, effPreds, mobMs, effMs) {
+  const mob1 = normLabel(mobPreds[0].className);
+  const eff1 = normLabel(effPreds[0].className);
+  const agree = mob1 === eff1 || mob1.includes(eff1) || eff1.includes(mob1);
+
+  history.push({ src, mob1, eff1, agree, mobMs, effMs });
+
+  const tbody = $('hist-body');
+  tbody.innerHTML = history.map((r, i) => `
+    <tr>
+      <td><img src="${r.src}" class="thumb" alt="img ${i+1}"/></td>
+      <td>${r.mob1}</td>
+      <td>${r.eff1}</td>
+      <td class="center"><span class="match-dot ${r.agree ? 'yes' : 'no'}"></span></td>
+      <td>${r.mobMs} ms</td>
+      <td>${r.effMs} ms</td>
+    </tr>`).join('');
+
+  $('history-section').style.display = 'block';
+}
+
+$('clear-btn').addEventListener('click', () => {
+  history = [];
+  $('hist-body').innerHTML = '';
+  $('history-section').style.display = 'none';
+});
+</script>
+</body>
+</html>

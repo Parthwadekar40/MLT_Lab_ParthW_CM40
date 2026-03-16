@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MobileNet Accuracy Tester</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #f0f2f5;
+    color: #1a1a2e;
+    padding: 32px 16px 60px;
+  }
+
+  .container { max-width: 860px; margin: 0 auto; }
+
+  h2 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: #666; font-size: 13px; margin-bottom: 28px; }
+
+  /* STATUS */
+  #status-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    border-left: 4px solid #aaa;
+    padding: 10px 16px;
+    font-size: 13px;
+    color: #555;
+    margin-bottom: 24px;
+    border-radius: 0 6px 6px 0;
+    transition: border-color 0.3s;
+  }
+  #status-bar.ready  { border-color: #22c55e; color: #16a34a; }
+  #status-bar.busy   { border-color: #3b82f6; color: #1d4ed8; }
+  #status-bar.error  { border-color: #ef4444; color: #b91c1c; }
+
+  /* UPLOAD AREA */
+  #drop-area {
+    border: 2px dashed #c0c4cc;
+    border-radius: 10px;
+    background: #fff;
+    padding: 36px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    margin-bottom: 16px;
+  }
+  #drop-area:hover, #drop-area.over {
+    border-color: #3b82f6;
+    background: #eff6ff;
+  }
+  #drop-area input { display: none; }
+  #drop-area .icon { font-size: 36px; margin-bottom: 8px; }
+  #drop-area p { color: #555; font-size: 14px; }
+  #drop-area p strong { color: #3b82f6; }
+  #file-count { font-size: 12px; color: #888; margin-top: 6px; }
+
+  /* LABEL HINT */
+  .hint-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .hint-row label { font-size: 13px; color: #555; white-space: nowrap; }
+  #label-input {
+    flex: 1;
+    min-width: 180px;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #1a1a2e;
+  }
+  #label-input:focus { outline: 2px solid #3b82f6; border-color: transparent; }
+
+  /* CONTROLS */
+  .controls { display: flex; gap: 10px; margin-bottom: 28px; flex-wrap: wrap; }
+
+  button {
+    padding: 10px 22px;
+    border: none;
+    border-radius: 7px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.2s, transform 0.1s;
+  }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  #run-btn  { background: #3b82f6; color: #fff; }
+  #run-btn:hover:not(:disabled)   { background: #2563eb; }
+  #clear-btn { background: #f1f5f9; color: #374151; }
+  #clear-btn:hover:not(:disabled) { background: #e2e8f0; }
+
+  /* SUMMARY BAR */
+  #summary {
+    display: none;
+    background: #fff;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+  }
+  #summary h3 { font-size: 15px; margin-bottom: 14px; color: #374151; }
+  .stats-row { display: flex; gap: 24px; flex-wrap: wrap; }
+  .stat {
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .stat .val {
+    font-size: 26px; font-weight: 700; color: #3b82f6;
+  }
+  .stat .lbl { font-size: 12px; color: #9ca3af; }
+
+  /* PROGRESS */
+  #progress-wrap { display: none; margin-bottom: 24px; }
+  #progress-wrap p { font-size: 12px; color: #888; margin-bottom-6px; margin-bottom: 6px; }
+  .prog-track {
+    height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden;
+  }
+  .prog-fill {
+    height: 100%; background: #3b82f6; border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+
+  /* IMAGE GRID */
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+  }
+
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+    transition: box-shadow 0.2s;
+  }
+  .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.11); }
+
+  .card img {
+    width: 100%; height: 160px;
+    object-fit: cover;
+    display: block;
+    background: #f0f2f5;
+  }
+
+  .card-body { padding: 14px; }
+  .card-filename {
+    font-size: 11px; color: #9ca3af;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin-bottom: 6px;
+  }
+  .card-true-label {
+    font-size: 12px; color: #6b7280; margin-bottom: 10px;
+  }
+  .card-true-label span { font-weight: 600; color: #374151; }
+
+  /* result rows inside card */
+  .pred-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 6px; font-size: 12px;
+  }
+  .pred-rank { color: #aaa; width: 14px; flex-shrink: 0; }
+  .pred-label { flex: 1; color: #374151; font-weight: 500; }
+  .pred-pct { color: #6b7280; width: 36px; text-align: right; flex-shrink: 0; }
+  .mini-bar { flex: 0 0 60px; }
+  .mini-bg { height: 4px; background: #f1f5f9; border-radius: 2px; overflow: hidden; }
+  .mini-fill {
+    height: 100%; background: #3b82f6;
+    border-radius: 2px; transition: width 0.5s ease;
+  }
+  .pred-row:nth-child(2) .mini-fill { background: #f472b6; }
+  .pred-row:nth-child(3) .mini-fill { background: #fb923c; }
+
+  /* badge on card */
+  .badge {
+    display: inline-block;
+    font-size: 10px; font-weight: 700;
+    padding: 2px 7px; border-radius: 999px;
+    margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .badge.match   { background: #dcfce7; color: #16a34a; }
+  .badge.partial { background: #fef9c3; color: #a16207; }
+  .badge.miss    { background: #fee2e2; color: #b91c1c; }
+  .badge.pending { background: #f1f5f9; color: #9ca3af; }
+
+  .empty-state {
+    grid-column: 1/-1;
+    text-align: center; color: #aaa; font-size: 14px; padding: 40px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h2>🧪 MobileNet Accuracy Tester</h2>
+  <p class="sub">Upload 5+ images, optionally add true labels, then run classification to measure accuracy.</p>
+
+  <div id="status-bar">⏳ Loading MobileNet model…</div>
+
+  <!-- UPLOAD -->
+  <div id="drop-area" onclick="document.getElementById('file-input').click()">
+    <input type="file" id="file-input" accept="image/*" multiple/>
+    <div class="icon">🖼️</div>
+    <p><strong>Click to upload</strong> or drag & drop images here</p>
+    <p style="font-size:12px;color:#aaa;margin-top:4px;">Select 5 or more images (PNG, JPG, WEBP)</p>
+    <div id="file-count"></div>
+  </div>
+
+  <div class="hint-row">
+    <label>True labels (comma-separated, in upload order):</label>
+    <input type="text" id="label-input" placeholder="e.g. cat, dog, car, banana, chair"/>
+  </div>
+
+  <div class="controls">
+    <button id="run-btn" disabled>▶ Run Classification</button>
+    <button id="clear-btn" disabled>✕ Clear All</button>
+  </div>
+
+  <div id="progress-wrap">
+    <p id="progress-text">Classifying 0 / 0…</p>
+    <div class="prog-track"><div class="prog-fill" id="prog-fill" style="width:0%"></div></div>
+  </div>
+
+  <div id="summary">
+    <h3>📊 Accuracy Summary</h3>
+    <div class="stats-row">
+      <div class="stat"><div class="val" id="s-total">0</div><div class="lbl">Images</div></div>
+      <div class="stat"><div class="val" id="s-match">0</div><div class="lbl">Top-1 Match</div></div>
+      <div class="stat"><div class="val" id="s-top3">0</div><div class="lbl">Top-3 Match</div></div>
+      <div class="stat"><div class="val" id="s-acc">—</div><div class="lbl">Top-1 Accuracy</div></div>
+      <div class="stat"><div class="val" id="s-acc3">—</div><div class="lbl">Top-3 Accuracy</div></div>
+    </div>
+  </div>
+
+  <div id="grid">
+    <div class="empty-state">No images uploaded yet.</div>
+  </div>
+
+</div>
+
+<script>
+  let model = null;
+  let imageFiles = [];
+
+  const statusBar   = document.getElementById('status-bar');
+  const fileInput   = document.getElementById('file-input');
+  const fileCount   = document.getElementById('file-count');
+  const dropArea    = document.getElementById('drop-area');
+  const runBtn      = document.getElementById('run-btn');
+  const clearBtn    = document.getElementById('clear-btn');
+  const grid        = document.getElementById('grid');
+  const labelInput  = document.getElementById('label-input');
+  const progWrap    = document.getElementById('progress-wrap');
+  const progFill    = document.getElementById('prog-fill');
+  const progText    = document.getElementById('progress-text');
+  const summary     = document.getElementById('summary');
+
+  // ── Load model ──────────────────────────────────────────────────────────────
+  mobilenet.load().then(m => {
+    model = m;
+    setStatus('ready', '✅ Model ready — upload images to begin.');
+    updateButtons();
+  }).catch(e => setStatus('error', '❌ Failed to load model: ' + e.message));
+
+  function setStatus(cls, msg) {
+    statusBar.className = cls;
+    statusBar.textContent = msg;
+  }
+
+  // ── Drag & drop ─────────────────────────────────────────────────────────────
+  dropArea.addEventListener('dragover',  e => { e.preventDefault(); dropArea.classList.add('over'); });
+  dropArea.addEventListener('dragleave', () => dropArea.classList.remove('over'));
+  dropArea.addEventListener('drop', e => {
+    e.preventDefault(); dropArea.classList.remove('over');
+    handleFiles([...e.dataTransfer.files].filter(f => f.type.startsWith('image/')));
+  });
+  fileInput.addEventListener('change', () => handleFiles([...fileInput.files]));
+
+  function handleFiles(files) {
+    if (!files.length) return;
+    imageFiles = [...imageFiles, ...files];
+    fileCount.textContent = `${imageFiles.length} image${imageFiles.length !== 1 ? 's' : ''} selected`;
+    renderCards();
+    updateButtons();
+    summary.style.display = 'none';
+  }
+
+  function updateButtons() {
+    runBtn.disabled  = !(model && imageFiles.length >= 1);
+    clearBtn.disabled = imageFiles.length === 0;
+  }
+
+  // ── Render placeholder cards ────────────────────────────────────────────────
+  function renderCards(predictions) {
+    grid.innerHTML = '';
+    if (!imageFiles.length) {
+      grid.innerHTML = '<div class="empty-state">No images uploaded yet.</div>';
+      return;
+    }
+    imageFiles.forEach((file, i) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.id = `card-${i}`;
+
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(file);
+      img.alt = file.name;
+
+      const trueLabels = labelInput.value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      const trueLabel  = trueLabels[i] || '';
+
+      const body = document.createElement('div');
+      body.className = 'card-body';
+      body.innerHTML = `
+        <div class="card-filename">${file.name}</div>
+        ${trueLabel ? `<div class="card-true-label">True label: <span>${trueLabel}</span></div>` : ''}
+        <span class="badge pending" id="badge-${i}">Pending</span>
+        <div id="preds-${i}"><div style="font-size:12px;color:#aaa;">—</div></div>
+      `;
+      card.appendChild(img);
+      card.appendChild(body);
+      grid.appendChild(card);
+    });
+  }
+
+  // ── Run classification ───────────────────────────────────────────────────────
+  runBtn.addEventListener('click', async () => {
+    if (!model || !imageFiles.length) return;
+
+    runBtn.disabled = true;
+    clearBtn.disabled = true;
+    setStatus('busy', `⚙️ Classifying ${imageFiles.length} images…`);
+    renderCards(); // reset badges
+
+    progWrap.style.display = 'block';
+    summary.style.display  = 'none';
+
+    const trueLabels = labelInput.value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    let top1Match = 0, top3Match = 0;
+
+    for (let i = 0; i < imageFiles.length; i++) {
+      // update progress
+      progText.textContent = `Classifying ${i + 1} / ${imageFiles.length}…`;
+      progFill.style.width = ((i / imageFiles.length) * 100) + '%';
+
+      const imgEl = grid.querySelector(`#card-${i} img`);
+      let preds;
+      try {
+        preds = await model.classify(imgEl, 3);
+      } catch(e) {
+        document.getElementById(`preds-${i}`).innerHTML = `<div style="font-size:12px;color:#ef4444;">Error: ${e.message}</div>`;
+        continue;
+      }
+
+      // Render predictions
+      const predBox = document.getElementById(`preds-${i}`);
+      predBox.innerHTML = preds.map((p, r) => {
+        const pct = (p.probability * 100).toFixed(1);
+        const lbl = p.className.split(',')[0].trim();
+        return `
+          <div class="pred-row">
+            <span class="pred-rank">#${r+1}</span>
+            <span class="pred-label">${lbl}</span>
+            <div class="mini-bar"><div class="mini-bg"><div class="mini-fill" style="width:0%" data-w="${pct}%"></div></div></div>
+            <span class="pred-pct">${pct}%</span>
+          </div>`;
+      }).join('');
+
+      // Animate bars
+      requestAnimationFrame(() => {
+        predBox.querySelectorAll('.mini-fill').forEach(b => b.style.width = b.dataset.w);
+      });
+
+      // Accuracy check
+      const badge = document.getElementById(`badge-${i}`);
+      if (trueLabels[i]) {
+        const tl = trueLabels[i];
+        const top1 = preds[0].className.toLowerCase();
+        const top3 = preds.map(p => p.className.toLowerCase()).join(' ');
+        const isTop1 = top1.includes(tl) || tl.includes(top1.split(',')[0].trim());
+        const isTop3 = top3.includes(tl);
+        if (isTop1)       { badge.className = 'badge match';   badge.textContent = '✓ Top-1 Match'; top1Match++; top3Match++; }
+        else if (isTop3)  { badge.className = 'badge partial'; badge.textContent = '~ Top-3 Match'; top3Match++; }
+        else              { badge.className = 'badge miss';    badge.textContent = '✗ No Match'; }
+      } else {
+        badge.className = 'badge pending';
+        badge.textContent = 'Classified';
+      }
+    }
+
+    progFill.style.width = '100%';
+    progText.textContent = `Done — ${imageFiles.length} images classified.`;
+
+    // Show summary if labels were provided
+    if (trueLabels.length) {
+      const labeled = Math.min(trueLabels.length, imageFiles.length);
+      document.getElementById('s-total').textContent = labeled;
+      document.getElementById('s-match').textContent = top1Match;
+      document.getElementById('s-top3').textContent  = top3Match;
+      document.getElementById('s-acc').textContent   = (top1Match / labeled * 100).toFixed(0) + '%';
+      document.getElementById('s-acc3').textContent  = (top3Match / labeled * 100).toFixed(0) + '%';
+      summary.style.display = 'block';
+    }
+
+    setStatus('ready', `✅ Classification complete — ${imageFiles.length} images processed.`);
+    runBtn.disabled   = false;
+    clearBtn.disabled = false;
+  });
+
+  // ── Clear ────────────────────────────────────────────────────────────────────
+  clearBtn.addEventListener('click', () => {
+    imageFiles = [];
+    fileInput.value = '';
+    labelInput.value = '';
+    fileCount.textContent = '';
+    progWrap.style.display = 'none';
+    summary.style.display  = 'none';
+    progFill.style.width = '0%';
+    renderCards();
+    updateButtons();
+    setStatus('ready', '✅ Model ready — upload images to begin.');
+  });
+</script>
+</body>
+</html>
