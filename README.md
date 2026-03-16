@@ -21,11 +21,11 @@ This series of projects is designed to provide a comprehensive understanding of 
 | No. | Project Title | Description | Status |
 | :--- | :--- | :--- | :--- |
 | 00 | [Hello TensorFlow.js](./HelloTensorFlowJS) | Environment setup and basic Tensor operations. | ✅ Complete |
-| 01 | [Linear Regression](./Practical-1) | Training a simple regression model on synthetic data. | ✅ Complete |
-| 02 | [Digit Recognition](./Practical-2-corrected) | MNIST handwritten digit classification using CNNs. | ✅ Complete |
-| 03 | [Sentiment Analysis](./Practical-3) | Natural Language Processing (NLP) to classify text. | ✅ Complete |
-| 04 | Image Classification | Using MobileNet for instant browser-based recognition. | ⏳ Coming Soon |
-| 05 | Real-time Object Detection | Webcam-based detection and frame-by-frame analysis. | ⏳ Coming Soon |
+| 01 | [Linear Regression](./Linear-Regression) | Training a simple regression model on synthetic data. | ✅ Complete |
+| 02 | [Digit Recognition](./Digit-Recognition) | MNIST handwritten digit classification using CNNs. | ✅ Complete |
+| 03 | [Sentiment Analysis](./Text-Sentiment-Analysis) | Natural Language Processing (NLP) to classify text. | ✅ Complete |
+| 04 | [Image Classification](./Image-classification) | Using MobileNet for instant browser-based recognition. | ✅ Complete |
+| 05 | [Real-time Object Detection](./Web-cam) | Webcam-based detection and frame-by-frame analysis. | ✅ Complete |
 | 06 | Pose Detection | Human body pose estimation using PoseNet. | ⏳ Coming Soon |
 | 07 | Model Deployment | Saving, reloading, and serving trained models locally. | ⏳ Coming Soon |
 | 08 | Transfer Learning | Customizing MobileNet for specific image categories. | ⏳ Coming Soon |
