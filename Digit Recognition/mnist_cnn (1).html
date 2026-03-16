@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MNIST Digit Recognizer</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0b0c10; --surface: #13151c; --card: #1a1d27; --border: #2a2d3e;
+    --accent: #00f5c4; --accent2: #7c6fff; --text: #e8eaf0; --muted: #6b7091;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem; }
+  header { text-align: center; margin-bottom: 2rem; }
+  header h1 { font-family: 'Space Mono', monospace; font-size: clamp(1.6rem,4vw,2.4rem);
+    letter-spacing: -1px; background: linear-gradient(135deg,var(--accent),var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  header p { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; font-weight: 300; }
+
+  .wrap { width: 100%; max-width: 920px; display: flex; flex-direction: column; gap: 1.2rem; }
+  .row { display: grid; gap: 1.2rem; }
+  .row-2 { grid-template-columns: 1fr 1fr; }
+  .row-3 { grid-template-columns: 1fr 1fr 1fr; }
+  @media(max-width:700px) { .row-2,.row-3 { grid-template-columns: 1fr; } }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 1.4rem; }
+  .card h2 { font-family: 'Space Mono', monospace; font-size: 0.68rem; letter-spacing: 3px;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 1rem; }
+
+  #status-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.65rem 1rem; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.9rem;
+    display: flex; align-items: center; gap: 0.5rem; }
+  #status-bar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex-shrink: 0; transition: background 0.3s; }
+  #status-bar.active .dot { background: var(--accent); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .progress-row { display: flex; justify-content: space-between; font-size: 0.74rem; color: var(--muted); margin-bottom: 0.3rem; }
+  .progress-track { background: var(--surface); border-radius: 999px; height: 5px; overflow: hidden; margin-bottom: 0.9rem; }
+  .progress-fill { height: 100%; border-radius: 999px; width: 0%; background: linear-gradient(90deg,var(--accent),var(--accent2)); transition: width 0.3s; }
+
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 1rem; }
+  .metric { background: var(--surface); border-radius: 10px; padding: 0.55rem 0.8rem; border: 1px solid var(--border); }
+  .metric .label { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .metric .val { font-family: 'Space Mono', monospace; font-size: 0.95rem; color: var(--accent); margin-top: 2px; }
+
+  button { width: 100%; padding: 0.68rem; border: none; border-radius: 10px;
+    font-family: 'Space Mono', monospace; font-size: 0.75rem; letter-spacing: 1px;
+    cursor: pointer; transition: opacity 0.2s, transform 0.1s; }
+  button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn-primary  { background: linear-gradient(135deg,var(--accent),var(--accent2)); color: #0b0c10; font-weight: 700; }
+  .btn-secondary{ background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn-purple   { background: var(--accent2); color: #fff; font-weight: 700; }
+
+  .chart-wrap { position: relative; height: 175px; }
+
+  .canvas-wrap { display: flex; justify-content: center; margin-bottom: 0.8rem; }
+  #draw-canvas { background: #000; border-radius: 12px; border: 2px solid var(--border); cursor: crosshair; touch-action: none; display: block; }
+
+  .samples-label { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 0.45rem; }
+  .sample-btns { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 0.8rem; }
+  .sample-btns button { width: 28px; padding: 0.3rem 0; font-size: 0.72rem; border-radius: 6px;
+    background: var(--surface); color: var(--text); border: 1px solid var(--border); letter-spacing: 0; }
+  .sample-btns button:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+
+  .result-box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem; text-align: center; }
+  .result-box .big-digit { font-family: 'Space Mono', monospace; font-size: 3rem; line-height: 1;
+    background: linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .result-box .conf { font-size: 0.72rem; color: var(--muted); margin-top: 0.3rem; }
+  .bar-list { margin-top: 0.7rem; display: flex; flex-direction: column; gap: 3px; }
+  .bar-row { display: flex; align-items: center; gap: 5px; font-size: 0.65rem; }
+  .bar-row .num { width: 10px; color: var(--muted); font-family: 'Space Mono', monospace; }
+  .bar-track { flex: 1; background: var(--border); border-radius: 999px; height: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 999px; background: var(--accent); transition: width 0.4s; }
+  .bar-row.top .bar-fill { background: linear-gradient(90deg,var(--accent),var(--accent2)); }
+  .bar-row .pct { width: 32px; text-align: right; color: var(--muted); font-family: 'Space Mono', monospace; }
+
+  .model-info { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.55rem 0.8rem; font-size: 0.68rem; color: var(--muted); margin-bottom: 0.8rem;
+    font-family: 'Space Mono', monospace; line-height: 1.6; }
+  .model-info span { color: var(--accent); }
+  .save-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .save-hint { font-size: 0.63rem; color: var(--muted); line-height: 1.6; margin-top: 0.7rem; }
+  .save-hint b { color: var(--text); }
+
+  #console { background: #000; border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.75rem 1rem; height: 155px; overflow-y: auto;
+    font-family: 'Space Mono', monospace; font-size: 0.68rem; line-height: 1.8; }
+  #console::-webkit-scrollbar { width: 3px; }
+  #console::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+  .log-info  { color: #3e4260; }
+  .log-ok    { color: var(--accent); }
+  .log-warn  { color: #ffc94d; }
+  .log-pred  { color: var(--accent2); }
+  .log-epoch { color: #b0b2c0; }
+  .log-ts    { color: #222538; margin-right: 8px; user-select: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MNIST · CNN</h1>
+  <p>Train · Live Chart · Sample Digits · Save &amp; Load · Console</p>
+</header>
+
+<div class="wrap">
+
+  <!-- Row 1: Training + Live Chart -->
+  <div class="row row-2">
+    <div class="card">
+      <h2>Training</h2>
+      <div id="status-bar"><span class="dot"></span><span id="status-text">Ready to train</span></div>
+      <div class="progress-row">
+        <span>Epoch <span id="epoch-num">0</span> / <span id="epoch-total">8</span></span>
+        <span id="epoch-pct">0%</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="epoch-bar"></div></div>
+      <div class="metrics">
+        <div class="metric"><div class="label">Loss</div><div class="val" id="m-loss">—</div></div>
+        <div class="metric"><div class="label">Accuracy</div><div class="val" id="m-acc">—</div></div>
+        <div class="metric"><div class="label">Val Loss</div><div class="val" id="m-vloss">—</div></div>
+        <div class="metric"><div class="label">Val Acc</div><div class="val" id="m-vacc">—</div></div>
+      </div>
+      <button id="train-btn" class="btn-primary">▶ TRAIN MODEL (8 epochs)</button>
+    </div>
+
+    <div class="card">
+      <h2>Live Training Chart</h2>
+      <div class="chart-wrap"><canvas id="chart-canvas"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Row 2: Draw + Predict + Save/Load -->
+  <div class="row row-3">
+
+    <div class="card">
+      <h2>Draw a Digit</h2>
+      <div class="canvas-wrap">
+        <canvas id="draw-canvas" width="185" height="185"></canvas>
+      </div>
+      <div class="samples-label">Or pick a sample</div>
+      <div class="sample-btns" id="sample-btns">
+        <button disabled>0</button><button disabled>1</button><button disabled>2</button>
+        <button disabled>3</button><button disabled>4</button><button disabled>5</button>
+        <button disabled>6</button><button disabled>7</button><button disabled>8</button>
+        <button disabled>9</button>
+      </div>
+      <div class="btn-row">
+        <button id="clear-btn" class="btn-secondary">✕ CLEAR</button>
+        <button id="predict-btn" class="btn-purple" disabled>◆ PREDICT</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Prediction</h2>
+      <div class="result-box">
+        <div class="big-digit" id="pred-digit">?</div>
+        <div class="conf" id="pred-conf">Train model first</div>
+        <div class="bar-list" id="bar-list"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Save / Load Model</h2>
+      <div class="model-info" id="model-info">No model loaded</div>
+      <div class="save-row">
+        <button id="save-btn" class="btn-secondary" disabled>💾 SAVE</button>
+        <button id="load-btn" class="btn-secondary">📂 LOAD</button>
+      </div>
+      <button id="dl-btn" class="btn-secondary" disabled style="font-size:0.68rem">⬇ DOWNLOAD WEIGHTS</button>
+      <div class="save-hint">
+        <b>Save</b> stores model in browser IndexedDB.<br>
+        <b>Load</b> restores it — no retraining needed.<br>
+        <b>Download</b> exports weights as JSON files.
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Console -->
+  <div class="card">
+    <h2>Console Output</h2>
+    <div id="console"><span class="log-info">Initializing…</span></div>
+  </div>
+
+</div>
+
+<script>
+const EPOCHS = 5;
+let model = null, isDrawing = false, mnistSamples = null;
+
+// ── Console ───────────────────────────────────────────────────────
+function clog(msg, type='info') {
+  const box = document.getElementById('console');
+  const ts = new Date().toTimeString().slice(0,8);
+  if (box.children.length===1 && box.textContent.includes('Initializing')) box.innerHTML='';
+  const line = document.createElement('div');
+  line.innerHTML = `<span class="log-ts">[${ts}]</span><span class="log-${type}">${msg}</span>`;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ── Live Chart ────────────────────────────────────────────────────
+const cData = { labels:[], acc:[], val_acc:[], loss:[], val_loss:[] };
+const liveChart = new Chart(document.getElementById('chart-canvas'), {
+  type: 'line',
+  data: {
+    labels: cData.labels,
+    datasets: [
+      { label:'Acc',      data: cData.acc,      borderColor:'#00f5c4', backgroundColor:'rgba(0,245,196,0.07)', tension:0.4, pointRadius:3 },
+      { label:'Val Acc',  data: cData.val_acc,   borderColor:'#7c6fff', backgroundColor:'rgba(124,111,255,0.07)', tension:0.4, pointRadius:3, borderDash:[4,3] },
+      { label:'Loss',     data: cData.loss,      borderColor:'#ff6b6b', backgroundColor:'transparent', tension:0.4, pointRadius:3, yAxisID:'y2' },
+      { label:'Val Loss', data: cData.val_loss,  borderColor:'#ffc94d', backgroundColor:'transparent', tension:0.4, pointRadius:3, borderDash:[4,3], yAxisID:'y2' },
+    ]
+  },
+  options: {
+    responsive:true, maintainAspectRatio:false, animation:{duration:250},
+    plugins:{ legend:{ labels:{ color:'#6b7091', font:{family:'Space Mono',size:9}, boxWidth:10, padding:7 } } },
+    scales:{
+      x:{ ticks:{color:'#4a4e6a',font:{family:'Space Mono',size:9}}, grid:{color:'#1c1e2c'} },
+      y:{ ticks:{color:'#4a4e6a',font:{family:'Space Mono',size:9}}, grid:{color:'#1c1e2c'}, min:0, max:1,
+          title:{display:true,text:'Acc',color:'#4a4e6a',font:{size:8}} },
+      y2:{ position:'right', ticks:{color:'#4a4e6a',font:{family:'Space Mono',size:9}}, grid:{display:false},
+           title:{display:true,text:'Loss',color:'#4a4e6a',font:{size:8}} }
+    }
+  }
+});
+
+function pushChart(epoch, logs) {
+  cData.labels.push('E'+epoch);
+  cData.acc.push(+logs.acc.toFixed(4));
+  cData.val_acc.push(+logs.val_acc.toFixed(4));
+  cData.loss.push(+logs.loss.toFixed(4));
+  cData.val_loss.push(+logs.val_loss.toFixed(4));
+  liveChart.update();
+}
+function resetChart() {
+  ['labels','acc','val_acc','loss','val_loss'].forEach(k=>cData[k].length=0);
+  liveChart.update();
+}
+
+// ── Canvas ────────────────────────────────────────────────────────
+const canvas = document.getElementById('draw-canvas');
+const ctx = canvas.getContext('2d');
+function clearCanvas() { ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height); }
+clearCanvas();
+ctx.strokeStyle='#fff'; ctx.lineWidth=13; ctx.lineCap='round'; ctx.lineJoin='round';
+
+function getPos(e) {
+  const r = canvas.getBoundingClientRect();
+  const src = e.touches ? e.touches[0] : e;
+  return { x:(src.clientX-r.left)*(canvas.width/r.width), y:(src.clientY-r.top)*(canvas.height/r.height) };
+}
+canvas.addEventListener('mousedown',  e=>{ isDrawing=true; ctx.beginPath(); const p=getPos(e); ctx.moveTo(p.x,p.y); });
+canvas.addEventListener('mousemove',  e=>{ if(!isDrawing)return; const p=getPos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); });
+canvas.addEventListener('mouseup',    ()=>isDrawing=false);
+canvas.addEventListener('mouseleave', ()=>isDrawing=false);
+canvas.addEventListener('touchstart', e=>{ e.preventDefault(); isDrawing=true; ctx.beginPath(); const p=getPos(e); ctx.moveTo(p.x,p.y); }, {passive:false});
+canvas.addEventListener('touchmove',  e=>{ e.preventDefault(); if(!isDrawing)return; const p=getPos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); }, {passive:false});
+canvas.addEventListener('touchend',   ()=>isDrawing=false);
+
+document.getElementById('clear-btn').onclick = () => {
+  clearCanvas();
+  document.getElementById('pred-digit').textContent='?';
+  document.getElementById('pred-conf').textContent='Draw a digit and predict';
+  renderBars(new Array(10).fill(0));
+  clog('Canvas cleared.','info');
+};
+
+// ── Sample digits ─────────────────────────────────────────────────
+function drawSample(digit) {
+  if (!mnistSamples || !mnistSamples[digit]) return;
+  const pixels = mnistSamples[digit];
+  clearCanvas();
+  const tmp=document.createElement('canvas'); tmp.width=tmp.height=28;
+  const tc=tmp.getContext('2d');
+  const id=tc.createImageData(28,28);
+  for(let i=0;i<784;i++){const v=Math.round(pixels[i]*255);id.data[i*4]=id.data[i*4+1]=id.data[i*4+2]=v;id.data[i*4+3]=255;}
+  tc.putImageData(id,0,0);
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(tmp,0,0,canvas.width,canvas.height);
+  clog('Loaded sample digit: '+digit,'info');
+}
+document.getElementById('sample-btns').addEventListener('click', e=>{
+  if(e.target.tagName==='BUTTON' && !e.target.disabled) drawSample(+e.target.textContent);
+});
+
+// ── Bars ──────────────────────────────────────────────────────────
+function renderBars(probs, topIdx=-1) {
+  const list=document.getElementById('bar-list');
+  list.innerHTML='';
+  probs.forEach((p,i)=>{
+    const row=document.createElement('div');
+    row.className='bar-row'+(i===topIdx?' top':'');
+    const pct=(p*100).toFixed(1);
+    row.innerHTML=`<span class="num">${i}</span><div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div><span class="pct">${pct}%</span>`;
+    list.appendChild(row);
+  });
+}
+renderBars(new Array(10).fill(0));
+
+// ── Model ─────────────────────────────────────────────────────────
+function buildModel() {
+  clog('Building lightweight CNN (anti-overfit)…','info');
+  const reg = tf.regularizers.l2({l2: 0.001});
+  const m=tf.sequential();
+  m.add(tf.layers.conv2d({inputShape:[28,28,1],filters:16,kernelSize:3,activation:'relu',padding:'same',kernelRegularizer:reg}));
+  m.add(tf.layers.maxPooling2d({poolSize:2}));
+  m.add(tf.layers.conv2d({filters:32,kernelSize:3,activation:'relu',padding:'same',kernelRegularizer:reg}));
+  m.add(tf.layers.maxPooling2d({poolSize:2}));
+  m.add(tf.layers.flatten());
+  m.add(tf.layers.dense({units:64,activation:'relu',kernelRegularizer:reg}));
+  m.add(tf.layers.dropout({rate:0.3}));
+  m.add(tf.layers.dense({units:10,activation:'softmax'}));
+  m.compile({optimizer:tf.train.adam(0.001),loss:'categoricalCrossentropy',metrics:['accuracy']});
+  clog('  Conv2D(16)→Pool → Conv2D(32)→Pool → Dense(64)→Drop(0.3)→Dense(10)','info');
+  clog('  L2 regularization on all layers | Total params: '+m.countParams().toLocaleString(),'ok');
+  return m;
+}
+
+// ── Load MNIST ────────────────────────────────────────────────────
+// Uses tf.data.generator to build MNIST from the sprite sheet used by tfjs examples
+const MNIST_IMAGES_SPRITE_PATH = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png';
+const MNIST_LABELS_PATH        = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8';
+const IMAGE_SIZE = 784, NUM_CLASSES = 10, NUM_DATASET_ELEMENTS = 65000;
+const NUM_TRAIN = 8000;
+
+async function loadMNIST() {
+  setStatus('Loading MNIST data…', true);
+  clog('Fetching MNIST sprite + labels…', 'info');
+  const t0 = performance.now();
+
+  // Load labels
+  const labelsResp = await fetch(MNIST_LABELS_PATH);
+  if (!labelsResp.ok) throw new Error('Labels fetch failed: ' + labelsResp.status);
+  const labelsBuffer = await labelsResp.arrayBuffer();
+  const labels = new Uint8Array(labelsBuffer); // one-hot, 10 bytes per sample
+
+  // Load image sprite via Image element → canvas
+  const imgSprite = await new Promise((res, rej) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error('Image sprite failed to load'));
+    img.src = MNIST_IMAGES_SPRITE_PATH;
+  });
+
+  clog('Sprite loaded in ' + ((performance.now()-t0)/1000).toFixed(2) + 's', 'ok');
+
+  // Draw sprite to canvas and extract pixel data
+  const canvas2 = document.createElement('canvas');
+  canvas2.width  = imgSprite.width;
+  canvas2.height = imgSprite.height;
+  const ctx2 = canvas2.getContext('2d');
+  ctx2.drawImage(imgSprite, 0, 0);
+  const imgData = ctx2.getImageData(0, 0, canvas2.width, canvas2.height);
+  const pixels  = new Float32Array(imgData.data.length / 4);
+  for (let i = 0; i < pixels.length; i++) pixels[i] = imgData.data[i * 4] / 255; // R channel
+
+  clog('Sprite decoded — using ' + NUM_TRAIN + ' samples', 'info');
+
+  // Build sample digit cache for test buttons
+  mnistSamples = {};
+  for (let i = 0; i < NUM_TRAIN && Object.keys(mnistSamples).length < 10; i++) {
+    const labelRow = i * NUM_CLASSES;
+    let d = -1;
+    for (let c = 0; c < NUM_CLASSES; c++) if (labels[labelRow + c] === 1) { d = c; break; }
+    if (d >= 0 && !mnistSamples[d]) mnistSamples[d] = pixels.slice(i * IMAGE_SIZE, (i+1) * IMAGE_SIZE);
+  }
+  document.querySelectorAll('#sample-btns button').forEach(b => b.disabled = false);
+  clog('Sample digits (0-9) ready', 'ok');
+
+  return tf.tidy(() => {
+    const xs = tf.tensor4d(pixels.slice(0, NUM_TRAIN * IMAGE_SIZE), [NUM_TRAIN, 28, 28, 1]);
+    const ys = tf.tensor2d(labels.slice(0, NUM_TRAIN * NUM_CLASSES), [NUM_TRAIN, NUM_CLASSES]);
+    clog('Tensors: xs[' + xs.shape + '] ys[' + ys.shape + ']', 'ok');
+    return { xs, ys };
+  });
+}
+
+// ── Train ─────────────────────────────────────────────────────────
+document.getElementById('train-btn').onclick = async () => {
+  const btn=document.getElementById('train-btn');
+  btn.disabled=true;
+  document.getElementById('epoch-total').textContent=EPOCHS;
+  resetChart();
+  clog('Config: '+EPOCHS+' epochs | 8000 samples | L2 reg | Dropout 0.3','info');
+  clog('════════════════════════════════','info');
+  clog('Training started','ok');
+
+  let data;
+  try { data=await loadMNIST(); }
+  catch(e){ setStatus('Failed to load data',false); clog('ERROR: '+e.message,'warn'); btn.disabled=false; return; }
+
+  model=buildModel();
+  setStatus('Training…',true);
+  const t0=performance.now();
+
+  await model.fit(data.xs,data.ys,{
+    epochs:EPOCHS, batchSize:128, validationSplit:0.1,
+    callbacks:{
+      onEpochBegin: epoch=>clog('── Epoch '+(epoch+1)+'/'+EPOCHS,'info'),
+      onEpochEnd: (epoch,logs)=>{
+        const e=epoch+1;
+        document.getElementById('epoch-num').textContent=e;
+        const pct=Math.round(e/EPOCHS*100);
+        document.getElementById('epoch-pct').textContent=pct+'%';
+        document.getElementById('epoch-bar').style.width=pct+'%';
+        document.getElementById('m-loss').textContent=logs.loss.toFixed(4);
+        document.getElementById('m-acc').textContent=(logs.acc*100).toFixed(1)+'%';
+        document.getElementById('m-vloss').textContent=logs.val_loss.toFixed(4);
+        document.getElementById('m-vacc').textContent=(logs.val_acc*100).toFixed(1)+'%';
+        pushChart(e,logs);
+        clog('   loss:'+logs.loss.toFixed(4)+' acc:'+(logs.acc*100).toFixed(2)+'% val_loss:'+logs.val_loss.toFixed(4)+' val_acc:'+(logs.val_acc*100).toFixed(2)+'%','epoch');
+        // overfit warning: train acc much higher than val acc
+        const gap = logs.acc - logs.val_acc;
+        if(gap > 0.08) clog('   ⚠ Overfit gap: train-val acc = '+(gap*100).toFixed(1)+'% — consider stopping','warn');
+        else if(gap < 0.02) clog('   ✓ Good generalization (gap='+(gap*100).toFixed(1)+'%)','ok');
+      }
+    }
+  });
+
+  data.xs.dispose(); data.ys.dispose();
+  const sec=((performance.now()-t0)/1000).toFixed(1);
+  clog('Training complete in '+sec+'s | Final val_acc: '+document.getElementById('m-vacc').textContent,'ok');
+  clog('Draw a digit or pick a sample, then click PREDICT','ok');
+  setStatus('Model ready ✓',false);
+  document.getElementById('predict-btn').disabled=false;
+  document.getElementById('save-btn').disabled=false;
+  document.getElementById('dl-btn').disabled=false;
+  setModelInfo('Trained (unsaved)');
+  btn.textContent='↺ RETRAIN'; btn.disabled=false;
+};
+
+// ── Predict ───────────────────────────────────────────────────────
+document.getElementById('predict-btn').onclick = () => {
+  if(!model)return;
+  clog('─── Inference…','info');
+  const off=document.createElement('canvas'); off.width=off.height=28;
+  off.getContext('2d').drawImage(canvas,0,0,28,28);
+  const imgData=off.getContext('2d').getImageData(0,0,28,28);
+  const t0=performance.now();
+  const input=tf.tidy(()=>tf.browser.fromPixels(imgData,1).toFloat().div(255).reshape([1,28,28,1]));
+  const probs=model.predict(input).dataSync();
+  input.dispose();
+  const ms=(performance.now()-t0).toFixed(1);
+  const arr=Array.from(probs);
+  const top=arr.indexOf(Math.max(...arr));
+  document.getElementById('pred-digit').textContent=top;
+  document.getElementById('pred-conf').textContent='Confidence: '+(arr[top]*100).toFixed(1)+'%';
+  renderBars(arr,top);
+  clog('Predicted: '+top+' ('+( arr[top]*100).toFixed(2)+'%) in '+ms+'ms','pred');
+  const s=arr.map((p,i)=>({d:i,p})).sort((a,b)=>b.p-a.p);
+  clog('Top-3: '+s.slice(0,3).map(x=>x.d+'('+(x.p*100).toFixed(1)+'%)').join(' › '),'pred');
+};
+
+// ── Save / Load ───────────────────────────────────────────────────
+document.getElementById('save-btn').onclick = async () => {
+  if(!model)return;
+  clog('Saving to IndexedDB…','info');
+  try{
+    await model.save('indexeddb://mnist-cnn');
+    clog('Saved to indexeddb://mnist-cnn','ok');
+    setModelInfo('Saved (IndexedDB)');
+  }catch(e){clog('Save failed: '+e.message,'warn');}
+};
+
+document.getElementById('load-btn').onclick = async () => {
+  clog('Loading from IndexedDB…','info');
+  try{
+    model=await tf.loadLayersModel('indexeddb://mnist-cnn');
+    model.compile({optimizer:tf.train.adam(0.001),loss:'categoricalCrossentropy',metrics:['accuracy']});
+    clog('Loaded! Params: '+model.countParams().toLocaleString(),'ok');
+    clog('Model ready — no retraining needed','ok');
+    setStatus('Model loaded ✓',false);
+    document.getElementById('predict-btn').disabled=false;
+    document.getElementById('save-btn').disabled=false;
+    document.getElementById('dl-btn').disabled=false;
+    setModelInfo('Loaded from IndexedDB');
+    // fetch samples if not already loaded
+    if(!mnistSamples){
+      clog('Fetching sample digits…','info');
+      try{
+        const [imgSpr,labBuf]=await Promise.all([
+          new Promise((res,rej)=>{const img=new Image();img.crossOrigin='anonymous';img.onload=()=>res(img);img.onerror=()=>rej(new Error('sprite'));img.src=MNIST_IMAGES_SPRITE_PATH;}),
+          fetch(MNIST_LABELS_PATH).then(r=>r.arrayBuffer())
+        ]);
+        const lbl2=new Uint8Array(labBuf);
+        const c2=document.createElement('canvas');c2.width=imgSpr.width;c2.height=imgSpr.height;
+        const cx2=c2.getContext('2d');cx2.drawImage(imgSpr,0,0);
+        const id2=cx2.getImageData(0,0,c2.width,c2.height);
+        const px2=new Float32Array(id2.data.length/4);
+        for(let i=0;i<px2.length;i++) px2[i]=id2.data[i*4]/255;
+        mnistSamples={};
+        for(let i=0;i<5000&&Object.keys(mnistSamples).length<10;i++){
+          let d=-1;for(let c=0;c<10;c++)if(lbl2[i*10+c]===1){d=c;break;}
+          if(d>=0&&!mnistSamples[d]) mnistSamples[d]=px2.slice(i*784,(i+1)*784);
+        }
+        document.querySelectorAll('#sample-btns button').forEach(b=>b.disabled=false);
+        clog('Sample digits ready','ok');
+      }catch(e){clog('Could not load samples: '+e.message,'warn');}
+    }
+  }catch(e){clog('Load failed (nothing saved yet?): '+e.message,'warn');}
+};
+
+document.getElementById('dl-btn').onclick = async () => {
+  if(!model)return;
+  clog('Downloading weights as JSON…','info');
+  try{
+    await model.save('downloads://mnist-cnn');
+    clog('Check your Downloads folder for mnist-cnn.json + weights','ok');
+  }catch(e){clog('Download failed: '+e.message,'warn');}
+};
+
+function setModelInfo(status){
+  const p=model?model.countParams().toLocaleString():'—';
+  document.getElementById('model-info').innerHTML='Status: <span>'+status+'</span><br>Params: <span>'+p+'</span>';
+}
+
+function setStatus(msg,active){
+  document.getElementById('status-text').textContent=msg;
+  document.getElementById('status-bar').classList.toggle('active',active);
+}
+
+clog('TensorFlow.js loaded — detecting backend…','info');
+tf.ready().then(()=>{
+  clog('TF backend ready: '+tf.getBackend(),'ok');
+  clog('Click ▶ TRAIN MODEL to begin','info');
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CNN vs Dense — MNIST</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<style>
+  body { font-family: monospace; background: #111; color: #eee; padding: 2rem; max-width: 700px; margin: auto; }
+  h2 { color: #00f5c4; margin-bottom: 0.3rem; }
+  p  { color: #555; font-size: 0.85rem; margin-bottom: 1.5rem; }
+  button { background: #00f5c4; color: #111; border: none; padding: 0.6rem 1.4rem;
+    font-family: monospace; font-size: 0.95rem; cursor: pointer; border-radius: 6px; margin-bottom: 1.5rem; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem; }
+  .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 1rem; }
+  .card h3 { margin: 0 0 0.8rem; font-size: 0.85rem; letter-spacing: 2px; text-transform: uppercase; }
+  .cnn-card h3  { color: #00f5c4; }
+  .dense-card h3{ color: #7c6fff; }
+  .metric { display: flex; justify-content: space-between; font-size: 0.78rem; padding: 0.25rem 0;
+    border-bottom: 1px solid #222; }
+  .metric:last-child { border: none; }
+  .metric .val { color: #eee; }
+  .cnn-card  .val { color: #00f5c4; }
+  .dense-card .val { color: #7c6fff; }
+
+  .winner { text-align: center; padding: 1rem; background: #1a1a1a; border-radius: 10px;
+    border: 1px solid #2a2a2a; font-size: 0.9rem; display: none; }
+  .winner span { font-size: 1.3rem; }
+
+  .epoch-log { background: #000; border: 1px solid #1a1a1a; border-radius: 8px;
+    padding: 0.8rem 1rem; max-height: 220px; overflow-y: auto; font-size: 0.75rem; line-height: 1.8; }
+  .epoch-log::-webkit-scrollbar { width: 3px; }
+  .epoch-log::-webkit-scrollbar-thumb { background: #333; }
+  .c { color: #00f5c4; } .d { color: #7c6fff; } .dim { color: #444; } .ok { color: #ffc94d; }
+</style>
+</head>
+<body>
+
+<h2>CNN vs Dense Network — MNIST</h2>
+<p>Both models train on the same balanced dataset for 5 epochs. All output also in browser console (F12).</p>
+
+<button id="btn">▶ Run Comparison</button>
+
+<div class="grid">
+  <div class="card cnn-card">
+    <h3>🧠 CNN</h3>
+    <div class="metric"><span>Status</span><span class="val" id="cnn-status">—</span></div>
+    <div class="metric"><span>Test Accuracy</span><span class="val" id="cnn-acc">—</span></div>
+    <div class="metric"><span>Test Loss</span><span class="val" id="cnn-loss">—</span></div>
+    <div class="metric"><span>Params</span><span class="val" id="cnn-params">—</span></div>
+    <div class="metric"><span>Train Time</span><span class="val" id="cnn-time">—</span></div>
+  </div>
+  <div class="card dense-card">
+    <h3>⬛ Dense</h3>
+    <div class="metric"><span>Status</span><span class="val" id="dense-status">—</span></div>
+    <div class="metric"><span>Test Accuracy</span><span class="val" id="dense-acc">—</span></div>
+    <div class="metric"><span>Test Loss</span><span class="val" id="dense-loss">—</span></div>
+    <div class="metric"><span>Params</span><span class="val" id="dense-params">—</span></div>
+    <div class="metric"><span>Train Time</span><span class="val" id="dense-time">—</span></div>
+  </div>
+</div>
+
+<div class="winner" id="winner"></div>
+<br>
+<div class="epoch-log" id="log"><span class="dim">Output will appear here and in browser console (F12)...</span></div>
+
+<script>
+const SPRITE = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png';
+const LABELS = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8';
+
+function log(msg, cls='dim') {
+  const box = document.getElementById('log');
+  if (box.children.length===1 && box.textContent.includes('Output will')) box.innerHTML='';
+  const d = document.createElement('div');
+  d.innerHTML = `<span class="${cls}">${msg}</span>`;
+  box.appendChild(d); box.scrollTop = box.scrollHeight;
+  console.log('[MNIST] ' + msg);
+}
+
+function set(id, val) { document.getElementById(id).textContent = val; }
+
+// ── Load data (shared) ────────────────────────────────────────────
+async function loadData() {
+  log('Fetching MNIST sprite + labels…', 'dim');
+  const [imgSprite, labelBuf] = await Promise.all([
+    new Promise((res,rej) => {
+      const img = new Image(); img.crossOrigin='anonymous';
+      img.onload=()=>res(img); img.onerror=()=>rej(new Error('sprite failed'));
+      img.src = SPRITE;
+    }),
+    fetch(LABELS).then(r=>r.arrayBuffer())
+  ]);
+  const labels = new Uint8Array(labelBuf);
+  const c = document.createElement('canvas');
+  c.width=imgSprite.width; c.height=imgSprite.height;
+  c.getContext('2d').drawImage(imgSprite,0,0);
+  const raw = c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+  const pixels = new Float32Array(raw.length/4);
+  for (let i=0;i<pixels.length;i++) pixels[i]=raw[i*4]/255;
+
+  // Balanced: 1000 per class, shuffled
+  const PER=1000, counts=new Array(10).fill(0), idx=[];
+  for (let i=0;i<65000;i++) {
+    let d=-1; for(let c=0;c<10;c++) if(labels[i*10+c]===1){d=c;break;}
+    if(d>=0&&counts[d]<PER){idx.push(i);counts[d]++;}
+    if(idx.length===PER*10) break;
+  }
+  for(let i=idx.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[idx[i],idx[j]]=[idx[j],idx[i]];}
+
+  const N=idx.length, split=Math.floor(N*0.9);
+  const xData=new Float32Array(N*784), yData=new Float32Array(N*10);
+  idx.forEach((src,i)=>{ xData.set(pixels.slice(src*784,(src+1)*784),i*784); yData.set(labels.slice(src*10,(src+1)*10),i*10); });
+  log(`Data ready — ${N} balanced samples (train:${split} test:${N-split})`, 'ok');
+
+  return {
+    xs_tr: tf.tensor4d(xData.slice(0,split*784),     [split,28,28,1]),
+    ys_tr: tf.tensor2d(yData.slice(0,split*10),      [split,10]),
+    xs_te: tf.tensor4d(xData.slice(split*784),       [N-split,28,28,1]),
+    ys_te: tf.tensor2d(yData.slice(split*10),        [N-split,10]),
+    xs_tr_flat: tf.tensor2d(xData.slice(0,split*784),[split,784]),
+    xs_te_flat: tf.tensor2d(xData.slice(split*784),  [N-split,784]),
+    ys_tr2: tf.tensor2d(yData.slice(0,split*10),     [split,10]),
+    ys_te2: tf.tensor2d(yData.slice(split*10),       [N-split,10]),
+  };
+}
+
+// ── Build CNN ─────────────────────────────────────────────────────
+function buildCNN() {
+  const m = tf.sequential();
+  m.add(tf.layers.conv2d({inputShape:[28,28,1],filters:32,kernelSize:3,activation:'relu',padding:'same'}));
+  m.add(tf.layers.maxPooling2d({poolSize:2}));
+  m.add(tf.layers.conv2d({filters:64,kernelSize:3,activation:'relu',padding:'same'}));
+  m.add(tf.layers.maxPooling2d({poolSize:2}));
+  m.add(tf.layers.flatten());
+  m.add(tf.layers.dense({units:64,activation:'relu'}));
+  m.add(tf.layers.dropout({rate:0.3}));
+  m.add(tf.layers.dense({units:10,activation:'softmax'}));
+  m.compile({optimizer:'adam',loss:'categoricalCrossentropy',metrics:['accuracy']});
+  return m;
+}
+
+// ── Build Dense ───────────────────────────────────────────────────
+function buildDense() {
+  const m = tf.sequential();
+  m.add(tf.layers.dense({inputShape:[784],units:256,activation:'relu'}));
+  m.add(tf.layers.dropout({rate:0.3}));
+  m.add(tf.layers.dense({units:128,activation:'relu'}));
+  m.add(tf.layers.dropout({rate:0.3}));
+  m.add(tf.layers.dense({units:64,activation:'relu'}));
+  m.add(tf.layers.dense({units:10,activation:'softmax'}));
+  m.compile({optimizer:'adam',loss:'categoricalCrossentropy',metrics:['accuracy']});
+  return m;
+}
+
+// ── Train one model ───────────────────────────────────────────────
+async function trainModel(model, xs, ys, name, cls) {
+  const prefix = name==='CNN' ? 'cnn' : 'dense';
+  set(prefix+'-params', model.countParams().toLocaleString());
+  set(prefix+'-status', 'Training…');
+  log(`── ${name} — ${model.countParams().toLocaleString()} params`, cls);
+  const t0 = performance.now();
+  await model.fit(xs, ys, {
+    epochs:5, batchSize:128, validationSplit:0.1,
+    callbacks: { onEpochEnd: (epoch, logs) => {
+      const msg = `  ${name} Epoch ${epoch+1}/5 | loss: ${logs.loss.toFixed(4)} | acc: ${(logs.acc*100).toFixed(2)}% | val_acc: ${(logs.val_acc*100).toFixed(2)}%`;
+      log(msg, cls);
+      set(prefix+'-status', `Epoch ${epoch+1}/5`);
+    }}
+  });
+  const elapsed = ((performance.now()-t0)/1000).toFixed(1);
+  set(prefix+'-time', elapsed+'s');
+  return elapsed;
+}
+
+// ── Main ──────────────────────────────────────────────────────────
+document.getElementById('btn').onclick = async () => {
+  const btn = document.getElementById('btn');
+  btn.disabled = true;
+  document.getElementById('winner').style.display = 'none';
+
+  console.log('[MNIST] ════════════════════════════════');
+  console.log('[MNIST] CNN vs Dense Network Comparison');
+  console.log('[MNIST] ════════════════════════════════');
+
+  const data = await loadData();
+
+  // Train CNN
+  const cnn = buildCNN();
+  await trainModel(cnn, data.xs_tr, data.ys_tr, 'CNN', 'c');
+  const [cLoss, cAcc] = cnn.evaluate(data.xs_te, data.ys_te);
+  const cAccVal  = (await cAcc.data())[0];
+  const cLossVal = (await cLoss.data())[0];
+  set('cnn-acc',  (cAccVal*100).toFixed(2)+'%');
+  set('cnn-loss', cLossVal.toFixed(4));
+  set('cnn-status', 'Done ✓');
+  console.log(`[MNIST] CNN  → Test Acc: ${(cAccVal*100).toFixed(2)}% | Loss: ${cLossVal.toFixed(4)}`);
+
+  // Train Dense
+  const dense = buildDense();
+  await trainModel(dense, data.xs_tr_flat, data.ys_tr2, 'Dense', 'd');
+  const [dLoss, dAcc] = dense.evaluate(data.xs_te_flat, data.ys_te2);
+  const dAccVal  = (await dAcc.data())[0];
+  const dLossVal = (await dLoss.data())[0];
+  set('dense-acc',  (dAccVal*100).toFixed(2)+'%');
+  set('dense-loss', dLossVal.toFixed(4));
+  set('dense-status', 'Done ✓');
+  console.log(`[MNIST] Dense→ Test Acc: ${(dAccVal*100).toFixed(2)}% | Loss: ${dLossVal.toFixed(4)}`);
+
+  // Cleanup
+  Object.values(data).forEach(t => t.dispose && t.dispose());
+
+  // Winner
+  const diff = ((cAccVal - dAccVal)*100).toFixed(2);
+  const winner = cAccVal >= dAccVal ? 'CNN' : 'Dense';
+  const wcolor = cAccVal >= dAccVal ? '#00f5c4' : '#7c6fff';
+  const msg = `<span style="color:${wcolor}">${winner}</span> wins by <span>${Math.abs(diff)}%</span> accuracy`;
+  document.getElementById('winner').innerHTML = '🏆 ' + msg;
+  document.getElementById('winner').style.display = 'block';
+
+  console.log('[MNIST] ── Final Comparison ──');
+  console.log(`[MNIST] CNN   accuracy : ${(cAccVal*100).toFixed(2)}%`);
+  console.log(`[MNIST] Dense accuracy : ${(dAccVal*100).toFixed(2)}%`);
+  console.log(`[MNIST] Winner: ${winner} (+${Math.abs(diff)}%)`);
+
+  log('── Done! See full output in browser console (F12)', 'ok');
+  btn.textContent = '↺ Run Again'; btn.disabled = false;
+};
+
+console.log('[MNIST] CNN vs Dense ready — click Run Comparison');
+tf.ready().then(() => console.log('[MNIST] TF backend: ' + tf.getBackend()));
+</script>
+</body>
+</html>
