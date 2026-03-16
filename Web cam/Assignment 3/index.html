@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TF.js Real-Time Performance Monitor</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
+
+    <style>
+        body { font-family: sans-serif; background: #121212; color: white; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .container { position: relative; border: 2px solid #333; border-radius: 8px; overflow: hidden; }
+        video { transform: scaleX(-1); display: block; background: #000; }
+        
+        #stats-panel {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            min-width: 300px;
+            border: 1px solid #444;
+        }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .stat-value { font-family: monospace; color: #00ffcc; font-weight: bold; }
+        .status-loading { color: #ffcc00; }
+        .status-ready { color: #00ff00; }
+    </style>
+</head>
+<body>
+
+    <h2>Real-Time Inference Analyzer</h2>
+
+    <div class="container">
+        <video id="webcam" autoplay playsinline width="640" height="480"></video>
+    </div>
+
+    <div id="stats-panel">
+        <div class="stat-row">
+            <span>Status:</span>
+            <span id="status" class="status-loading">Loading Model...</span>
+        </div>
+        <hr style="border: 0; border-top: 1px solid #333;">
+        <div class="stat-row">
+            <span>Frames Per Second (FPS):</span>
+            <span id="fps-val" class="stat-value">0</span>
+        </div>
+        <div class="stat-row">
+            <span>Inference Latency:</span>
+            <span id="latency-val" class="stat-value">0ms</span>
+        </div>
+        <div class="stat-row">
+            <span>Top Prediction:</span>
+            <span id="prediction-val" class="stat-value">-</span>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const statusTxt = document.getElementById('status');
+        const fpsTxt = document.getElementById('fps-val');
+        const latencyTxt = document.getElementById('latency-val');
+        const predictTxt = document.getElementById('prediction-val');
+
+        let model;
+        let lastTimestamp = 0;
+        let fpsBuffer = [];
+
+        async function init() {
+            // 1. Setup Camera
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+                video.srcObject = stream;
+            } catch (err) {
+                alert("Webcam access denied or not found.");
+            }
+
+            // 2. Load Model
+            model = await mobilenet.load();
+            
+            statusTxt.innerText = "Running (WebGL)";
+            statusTxt.className = "status-ready";
+
+            // 3. Start Analysis Loop
+            requestAnimationFrame(renderLoop);
+        }
+
+        async function renderLoop(timestamp) {
+            // --- FPS Calculation (Total Loop Speed) ---
+            if (lastTimestamp) {
+                const delta = timestamp - lastTimestamp;
+                const fps = 1000 / delta;
+                
+                fpsBuffer.push(fps);
+                if (fpsBuffer.length > 20) fpsBuffer.shift();
+                const avgFps = fpsBuffer.reduce((a, b) => a + b) / fpsBuffer.length;
+                fpsTxt.innerText = Math.round(avgFps);
+            }
+            lastTimestamp = timestamp;
+
+            // --- Inference Latency (Model Speed) ---
+            const startInference = performance.now();
+            
+            // Wrap in tf.tidy to prevent memory leaks!
+            const predictions = await model.classify(video);
+            
+            const endInference = performance.now();
+            const latency = endInference - startInference;
+
+            // --- UI Updates ---
+            latencyTxt.innerText = `${latency.toFixed(1)}ms`;
+            if (predictions.length > 0) {
+                predictTxt.innerText = `${predictions[0].className} (${Math.round(predictions[0].probability * 100)}%)`;
+            }
+
+            // Call next frame
+            requestAnimationFrame(renderLoop);
+        }
+
+        // Initialize when page loads
+        init();
+    </script>
+</body>
+</html>

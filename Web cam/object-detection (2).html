@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VISION — Real-Time Object Detection</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+<style>
+:root{--bg:#080b0f;--surface:#0d1117;--panel:#111820;--border:#1e2d3d;--accent:#00e5ff;--accent2:#ff3d71;--accent3:#a259ff;--text:#e8f4f8;--muted:#4a6277;--success:#00e096;--warn:#ffaa00;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background-image:repeating-linear-gradient(0deg,transparent,transparent 40px,rgba(0,229,255,.012) 40px,rgba(0,229,255,.012) 41px),repeating-linear-gradient(90deg,transparent,transparent 40px,rgba(0,229,255,.012) 40px,rgba(0,229,255,.012) 41px);pointer-events:none;z-index:0;}
+.app{position:relative;z-index:1;display:grid;grid-template-rows:auto 1fr auto;min-height:100vh;max-width:1400px;margin:0 auto;padding:0 24px;}
+
+header{display:flex;align-items:center;justify-content:space-between;padding:20px 0 16px;border-bottom:1px solid var(--border);}
+.logo{display:flex;align-items:baseline;gap:10px;}
+.logo-text{font-family:'Bebas Neue',sans-serif;font-size:2.4rem;letter-spacing:.12em;background:linear-gradient(135deg,var(--accent),var(--accent3));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1;}
+.logo-sub{font-family:'Space Mono',monospace;font-size:.6rem;color:var(--muted);letter-spacing:.2em;text-transform:uppercase;}
+.header-right{display:flex;align-items:center;gap:16px;}
+.header-status{display:flex;align-items:center;gap:8px;font-family:'Space Mono',monospace;font-size:.65rem;color:var(--muted);letter-spacing:.08em;}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--muted);transition:all .4s;}
+.status-dot.active{background:var(--success);box-shadow:0 0 10px var(--success);animation:pulse-dot 1.5s infinite;}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+
+.countdown-wrap{display:flex;align-items:center;gap:8px;opacity:0;transition:opacity .4s;}
+.countdown-wrap.visible{opacity:1;}
+.countdown-ring{position:relative;width:40px;height:40px;}
+.countdown-ring svg{transform:rotate(-90deg);}
+.ring-bg{fill:none;stroke:var(--border);stroke-width:2.5;}
+.ring-fg{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linecap:round;transition:stroke-dashoffset 1s linear,stroke .5s;}
+.ring-fg.warn{stroke:var(--warn);}
+.ring-fg.danger{stroke:var(--accent2);}
+.countdown-num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-size:.62rem;transition:color .5s;}
+.countdown-label{font-family:'Space Mono',monospace;font-size:.56rem;color:var(--muted);letter-spacing:.1em;}
+
+main{display:grid;grid-template-columns:1fr 320px;gap:20px;padding:20px 0;align-items:start;}
+@media(max-width:900px){main{grid-template-columns:1fr;}}
+
+.video-panel{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden;}
+.video-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--border);}
+.video-label{font-family:'Space Mono',monospace;font-size:.6rem;letter-spacing:.15em;color:var(--muted);text-transform:uppercase;}
+.fps-badge{font-family:'Space Mono',monospace;font-size:.65rem;color:var(--accent);background:rgba(0,229,255,.08);padding:2px 8px;border-radius:2px;border:1px solid rgba(0,229,255,.2);min-width:72px;text-align:center;}
+.canvas-wrapper{position:relative;width:100%;aspect-ratio:16/9;background:#000;display:flex;align-items:center;justify-content:center;}
+.canvas-wrapper::before,.canvas-wrapper::after{content:'';position:absolute;width:24px;height:24px;z-index:10;pointer-events:none;}
+.canvas-wrapper::before{top:8px;left:8px;border-top:2px solid var(--accent);border-left:2px solid var(--accent);}
+.canvas-wrapper::after{bottom:8px;right:8px;border-bottom:2px solid var(--accent);border-right:2px solid var(--accent);}
+#webcam{position:absolute;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+#overlay{position:absolute;width:100%;height:100%;transform:scaleX(-1);}
+.scan-line{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,rgba(0,229,255,.5),transparent);animation:scan 3s linear infinite;pointer-events:none;z-index:5;display:none;}
+.scan-line.active{display:block;}
+@keyframes scan{from{top:0%}to{top:100%}}
+
+#stopped-overlay{position:absolute;inset:0;background:rgba(8,11,15,.82);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:15;}
+#stopped-overlay.visible{display:flex;}
+.stopped-title{font-family:'Bebas Neue',sans-serif;font-size:2.2rem;letter-spacing:.18em;color:var(--accent2);}
+.stopped-sub{font-family:'Space Mono',monospace;font-size:.62rem;color:var(--muted);letter-spacing:.1em;text-align:center;}
+.stopped-stats{display:flex;gap:24px;margin-top:4px;}
+.ss-item{text-align:center;}
+.ss-val{font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:var(--accent);letter-spacing:.08em;}
+.ss-lbl{font-family:'Space Mono',monospace;font-size:.52rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;}
+
+.loading-overlay{position:absolute;inset:0;background:rgba(8,11,15,.93);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:20;transition:opacity .5s;}
+.loading-overlay.hidden{opacity:0;pointer-events:none;}
+.spinner{position:relative;width:68px;height:68px;}
+.spinner::before{content:'';position:absolute;inset:0;border-radius:50%;border:2px solid rgba(0,229,255,.1);}
+.spinner::after{content:'';position:absolute;inset:0;border-radius:50%;border:2px solid transparent;border-top-color:var(--accent);animation:spin 1s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-family:'Space Mono',monospace;font-size:.7rem;color:var(--accent);letter-spacing:.2em;text-transform:uppercase;}
+.loading-sub{font-size:.72rem;color:var(--muted);margin-top:-10px;text-align:center;max-width:260px;line-height:1.5;}
+.dur-label{font-family:'Space Mono',monospace;font-size:.58rem;color:var(--muted);letter-spacing:.15em;text-transform:uppercase;}
+.duration-row{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;}
+.dur-btn{padding:7px 15px;background:transparent;border:1px solid var(--border);color:var(--muted);font-family:'Space Mono',monospace;font-size:.62rem;letter-spacing:.08em;cursor:pointer;border-radius:2px;transition:all .2s;}
+.dur-btn.sel,.dur-btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(0,229,255,.06);}
+#start-btn{padding:12px 36px;background:transparent;border:1px solid var(--accent);color:var(--accent);font-family:'Space Mono',monospace;font-size:.75rem;letter-spacing:.15em;text-transform:uppercase;cursor:pointer;border-radius:2px;position:relative;overflow:hidden;transition:all .3s;}
+#start-btn::before{content:'';position:absolute;inset:0;background:var(--accent);transform:scaleX(0);transform-origin:left;transition:transform .3s;z-index:-1;}
+#start-btn:hover{color:var(--bg);}
+#start-btn:hover::before{transform:scaleX(1);}
+#start-btn:disabled{opacity:.4;cursor:not-allowed;}
+.error-msg{font-family:'Space Mono',monospace;font-size:.65rem;color:var(--accent2);text-align:center;}
+
+.sidebar{display:flex;flex-direction:column;gap:16px;}
+.panel-card{background:var(--panel);border:1px solid var(--border);border-radius:4px;overflow:hidden;}
+.panel-title{font-family:'Space Mono',monospace;font-size:.6rem;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+.panel-count{background:rgba(0,229,255,.1);color:var(--accent);border:1px solid rgba(0,229,255,.25);font-size:.6rem;padding:1px 7px;border-radius:10px;min-width:22px;text-align:center;}
+#detections-list{padding:10px;min-height:90px;max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;}
+#detections-list::-webkit-scrollbar{width:3px;}
+#detections-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.det-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid rgba(0,229,255,.1);border-radius:3px;animation:slide-in .2s ease;}
+@keyframes slide-in{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
+.det-icon{font-size:1.1rem;width:24px;text-align:center;flex-shrink:0;}
+.det-info{flex:1;min-width:0;}
+.det-name{font-size:.8rem;font-weight:500;color:var(--text);text-transform:capitalize;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.det-conf{font-family:'Space Mono',monospace;font-size:.56rem;color:var(--muted);margin-top:2px;}
+.cb-wrap{width:38px;height:3px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden;flex-shrink:0;}
+.cb{height:100%;border-radius:2px;}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:22px 10px;color:var(--muted);font-size:.74rem;opacity:.6;}
+.empty-icon{font-size:1.4rem;opacity:.4;}
+
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);}
+.stat-cell{background:var(--panel);padding:12px 14px;}
+.stat-value{font-family:'Bebas Neue',sans-serif;font-size:1.75rem;line-height:1;color:var(--accent);letter-spacing:.05em;}
+.stat-label{font-family:'Space Mono',monospace;font-size:.52rem;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;margin-top:3px;}
+
+.slider-row{padding:12px 14px;display:flex;flex-direction:column;gap:8px;}
+.slider-header{display:flex;align-items:center;justify-content:space-between;}
+.slider-name{font-family:'Space Mono',monospace;font-size:.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;}
+.slider-val{font-family:'Space Mono',monospace;font-size:.62rem;color:var(--accent);}
+#conf-slider{-webkit-appearance:none;width:100%;height:3px;background:var(--border);border-radius:2px;outline:none;}
+#conf-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 8px rgba(0,229,255,.5);}
+
+.classes-wrap{padding:10px 12px;display:flex;flex-wrap:wrap;gap:5px;min-height:42px;}
+.class-tag{font-family:'Space Mono',monospace;font-size:.52rem;padding:3px 8px;border-radius:2px;border:1px solid;text-transform:capitalize;animation:tag-pop .2s ease;}
+@keyframes tag-pop{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}
+
+#restart-btn{display:none;margin:12px 14px 14px;padding:9px;background:transparent;border:1px solid var(--accent3);color:var(--accent3);font-family:'Space Mono',monospace;font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;border-radius:2px;transition:all .25s;width:calc(100% - 28px);}
+#restart-btn:hover{background:rgba(162,89,255,.1);}
+#restart-btn.visible{display:block;}
+
+footer{border-top:1px solid var(--border);padding:12px 0;display:flex;align-items:center;justify-content:space-between;}
+.footer-left,.footer-right{font-family:'Space Mono',monospace;font-size:.56rem;color:var(--muted);letter-spacing:.08em;}
+.footer-right span{color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">
+      <div class="logo-text">VISION</div>
+      <div class="logo-sub">Object Detection</div>
+    </div>
+    <div class="header-right">
+      <div class="countdown-wrap" id="countdown-wrap">
+        <div class="countdown-ring">
+          <svg width="40" height="40" viewBox="0 0 40 40">
+            <circle class="ring-bg" cx="20" cy="20" r="16"/>
+            <circle class="ring-fg" id="ring-fg" cx="20" cy="20" r="16"
+              stroke-dasharray="100.53" stroke-dashoffset="0"/>
+          </svg>
+          <div class="countdown-num" id="countdown-num" style="color:var(--accent)">60</div>
+        </div>
+        <div class="countdown-label">SEC LEFT</div>
+      </div>
+      <div class="header-status">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-text">STANDBY</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="video-panel">
+      <div class="video-header">
+        <span class="video-label">◉ Live Feed — COCO-SSD v2</span>
+        <span class="fps-badge" id="fps-badge">-- ms/frame</span>
+      </div>
+      <div class="canvas-wrapper">
+        <video id="webcam" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+        <div class="scan-line" id="scan-line"></div>
+
+        <div id="stopped-overlay">
+          <div class="stopped-title">SESSION ENDED</div>
+          <div class="stopped-sub">Detection complete — results saved below</div>
+          <div class="stopped-stats">
+            <div class="ss-item"><div class="ss-val" id="fin-frames">0</div><div class="ss-lbl">Frames</div></div>
+            <div class="ss-item"><div class="ss-val" id="fin-total">0</div><div class="ss-lbl">Detections</div></div>
+            <div class="ss-item"><div class="ss-val" id="fin-classes">0</div><div class="ss-lbl">Classes</div></div>
+          </div>
+        </div>
+
+        <div class="loading-overlay" id="loading-overlay">
+          <div class="spinner"></div>
+          <div class="loading-text" id="loading-text">VISION READY</div>
+          <div class="loading-sub" id="loading-sub">Predict every 500ms — low CPU usage</div>
+          <div class="dur-label">SESSION DURATION</div>
+          <div class="duration-row">
+            <button class="dur-btn" data-s="30">30 s</button>
+            <button class="dur-btn sel" data-s="60">1 min</button>
+            <button class="dur-btn" data-s="120">2 min</button>
+            <button class="dur-btn" data-s="300">5 min</button>
+          </div>
+          <button id="start-btn">▶ ACTIVATE CAMERA</button>
+          <div class="error-msg" id="error-msg"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="panel-card">
+        <div class="panel-title">
+          <span>◈ Live Detections</span>
+          <span class="panel-count" id="det-count">0</span>
+        </div>
+        <div id="detections-list">
+          <div class="empty-state"><div class="empty-icon">⊙</div><div>Awaiting feed…</div></div>
+        </div>
+        <button id="restart-btn">↺ NEW SESSION</button>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-title">⬡ Session Stats</div>
+        <div class="stats-grid">
+          <div class="stat-cell"><div class="stat-value" id="total-det">0</div><div class="stat-label">Total Detections</div></div>
+          <div class="stat-cell"><div class="stat-value" id="unique-cls">0</div><div class="stat-label">Unique Classes</div></div>
+          <div class="stat-cell"><div class="stat-value" id="peak-det">0</div><div class="stat-label">Peak / Frame</div></div>
+          <div class="stat-cell"><div class="stat-value" id="frames-proc">0</div><div class="stat-label">Frames Proc.</div></div>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-title">⊿ Confidence Threshold</div>
+        <div class="slider-row">
+          <div class="slider-header">
+            <span class="slider-name">Min Confidence</span>
+            <span class="slider-val" id="conf-val">50%</span>
+          </div>
+          <input type="range" id="conf-slider" min="10" max="95" value="50" step="5">
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-title">⟡ Classes Seen This Session</div>
+        <div class="classes-wrap" id="classes-wrap">
+          <div class="empty-state" style="width:100%"><div class="empty-icon" style="font-size:1rem">—</div></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-left">TENSORFLOW.JS · COCO-SSD v2.2 · 80 CLASSES · THROTTLED @ 500ms</div>
+    <div class="footer-right">BACKEND: <span id="backend-lbl">—</span></div>
+  </footer>
+</div>
+
+<script>
+// ─── Constants ───────────────────────────────────────────────────────
+const INTERVAL_MS   = 500;       // one prediction every 500ms — easy on CPU
+const RING_R        = 16;
+const CIRCUMFERENCE = 2 * Math.PI * RING_R; // ≈ 100.53
+
+// ─── Class helpers ───────────────────────────────────────────────────
+const COLORS = [
+  ['#00e5ff','rgba(0,229,255,.13)'],['#a259ff','rgba(162,89,255,.13)'],
+  ['#ff3d71','rgba(255,61,113,.13)'],['#00e096','rgba(0,224,150,.13)'],
+  ['#ffaa00','rgba(255,170,0,.13)'],['#ff6b35','rgba(255,107,53,.13)'],
+  ['#00b4d8','rgba(0,180,216,.13)'],['#c77dff','rgba(199,125,255,.13)'],
+];
+const ICONS = {person:'🧑',car:'🚗',bicycle:'🚲',motorcycle:'🏍',bus:'🚌',truck:'🚛',
+  cat:'🐱',dog:'🐶',bird:'🐦',horse:'🐴',cow:'🐄',sheep:'🐑',elephant:'🐘',bear:'🐻',
+  backpack:'🎒',umbrella:'☂️',handbag:'👜',bottle:'🍾',cup:'☕',chair:'🪑',
+  laptop:'💻',cell_phone:'📱',book:'📚',clock:'🕐',scissors:'✂️',
+  teddy_bear:'🧸',sports_ball:'⚽',traffic_light:'🚦',stop_sign:'🛑',
+  tv:'📺',keyboard:'⌨️',mouse:'🖱️',remote:'📱',vase:'🏺',
+};
+const getIcon  = c => ICONS[c] || '●';
+const getColor = c => COLORS[[...c].reduce((s,ch)=>s+ch.charCodeAt(0),0) % COLORS.length];
+
+// ─── State ───────────────────────────────────────────────────────────
+let model = null, stream = null, running = false;
+let threshold = 0.50, sessionDuration = 60, secondsLeft = 60;
+let frameCount = 0, totalDetections = 0, peakDetections = 0;
+let allClasses = new Set();
+let detectId = null, countdownId = null;
+
+// ─── DOM ─────────────────────────────────────────────────────────────
+const video      = document.getElementById('webcam');
+const canvas     = document.getElementById('overlay');
+const ctx        = canvas.getContext('2d');
+const startBtn   = document.getElementById('start-btn');
+const loadingOv  = document.getElementById('loading-overlay');
+const loadTxt    = document.getElementById('loading-text');
+const loadSub    = document.getElementById('loading-sub');
+const errMsg     = document.getElementById('error-msg');
+const statusDot  = document.getElementById('status-dot');
+const statusTxt  = document.getElementById('status-text');
+const fpsBadge   = document.getElementById('fps-badge');
+const scanLine   = document.getElementById('scan-line');
+const stoppedOv  = document.getElementById('stopped-overlay');
+const cdWrap     = document.getElementById('countdown-wrap');
+const cdNum      = document.getElementById('countdown-num');
+const ringFg     = document.getElementById('ring-fg');
+const detList    = document.getElementById('detections-list');
+const detCount   = document.getElementById('det-count');
+const totalDetEl = document.getElementById('total-det');
+const uniqClsEl  = document.getElementById('unique-cls');
+const peakDetEl  = document.getElementById('peak-det');
+const framesEl   = document.getElementById('frames-proc');
+const classWrap  = document.getElementById('classes-wrap');
+const slider     = document.getElementById('conf-slider');
+const confVal    = document.getElementById('conf-val');
+const restartBtn = document.getElementById('restart-btn');
+const backendLbl = document.getElementById('backend-lbl');
+const finFrames  = document.getElementById('fin-frames');
+const finTotal   = document.getElementById('fin-total');
+const finClasses = document.getElementById('fin-classes');
+
+// Show backend after TF loads
+tf.ready().then(() => { backendLbl.textContent = tf.getBackend().toUpperCase(); });
+
+// ─── Duration picker ─────────────────────────────────────────────────
+document.querySelectorAll('.dur-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.dur-btn').forEach(x => x.classList.remove('sel'));
+    b.classList.add('sel');
+    sessionDuration = parseInt(b.dataset.s);
+  });
+});
+
+// ─── Slider ──────────────────────────────────────────────────────────
+slider.addEventListener('input', () => {
+  threshold = slider.value / 100;
+  confVal.textContent = slider.value + '%';
+});
+
+// ─── Buttons ─────────────────────────────────────────────────────────
+startBtn.addEventListener('click', startSession);
+restartBtn.addEventListener('click', resetSession);
+
+// ─── Init ─────────────────────────────────────────────────────────────
+async function startSession() {
+  startBtn.disabled = true;
+  errMsg.textContent = '';
+  loadTxt.textContent = 'LOADING MODEL…';
+  loadSub.textContent = 'Fetching COCO-SSD weights (~8 MB)';
+
+  try {
+    if (!model) model = await cocoSsd.load({ base: 'mobilenet_v2' });
+
+    loadTxt.textContent = 'ACCESSING CAMERA…';
+    loadSub.textContent = 'Please allow camera access';
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    video.srcObject = stream;
+    await new Promise(res => { video.onloadedmetadata = res; });
+    await video.play();
+
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    // Reset state
+    frameCount = 0; totalDetections = 0; peakDetections = 0;
+    allClasses.clear();
+    secondsLeft = sessionDuration;
+
+    running = true;
+    loadingOv.classList.add('hidden');
+    stoppedOv.classList.remove('visible');
+    restartBtn.classList.remove('visible');
+    statusDot.classList.add('active');
+    statusTxt.textContent = 'LIVE';
+    scanLine.classList.add('active');
+    cdWrap.classList.add('visible');
+    updateRing(secondsLeft, sessionDuration);
+
+    // Throttled prediction — one frame every INTERVAL_MS
+    detectId    = setInterval(runDetection, INTERVAL_MS);
+    countdownId = setInterval(tickCountdown, 1000);
+
+  } catch(e) {
+    startBtn.disabled = false;
+    loadTxt.textContent = 'ERROR';
+    errMsg.textContent = '⚠ ' + (
+      e.name === 'NotAllowedError' ? 'Camera access denied. Please allow and retry.' :
+      e.message || 'Something went wrong.'
+    );
+  }
+}
+
+// ─── Detection tick (throttled) ───────────────────────────────────────
+async function runDetection() {
+  if (!running || video.readyState < 2) return;
+
+  if (canvas.width !== video.videoWidth) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+  }
+
+  const t0 = performance.now();
+  let preds;
+  try {
+    preds = await model.detect(video, 10, threshold);
+  } catch { return; }
+
+  fpsBadge.textContent = Math.round(performance.now() - t0) + ' ms/frame';
+
+  frameCount++;
+  totalDetections += preds.length;
+  if (preds.length > peakDetections) peakDetections = preds.length;
+  preds.forEach(p => allClasses.add(p.class));
+
+  framesEl.textContent   = cap(frameCount);
+  totalDetEl.textContent = cap(totalDetections);
+  uniqClsEl.textContent  = allClasses.size;
+  peakDetEl.textContent  = peakDetections;
+
+  draw(preds);
+  updateList(preds);
+  updateTags();
+}
+
+// ─── Countdown ────────────────────────────────────────────────────────
+function tickCountdown() {
+  secondsLeft = Math.max(0, secondsLeft - 1);
+  updateRing(secondsLeft, sessionDuration);
+  if (secondsLeft <= 0) stopSession();
+}
+
+function updateRing(left, total) {
+  const pct    = total > 0 ? left / total : 0;
+  const offset = CIRCUMFERENCE * (1 - pct);
+  ringFg.style.strokeDashoffset = offset;
+  ringFg.classList.remove('warn','danger');
+  if      (pct <= 0.15) { ringFg.classList.add('danger'); cdNum.style.color = 'var(--accent2)'; }
+  else if (pct <= 0.33) { ringFg.classList.add('warn');   cdNum.style.color = 'var(--warn)'; }
+  else                  {                                  cdNum.style.color = 'var(--accent)'; }
+  cdNum.textContent = left;
+}
+
+// ─── Stop ─────────────────────────────────────────────────────────────
+function stopSession() {
+  running = false;
+  clearInterval(detectId);
+  clearInterval(countdownId);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+
+  scanLine.classList.remove('active');
+  statusDot.classList.remove('active');
+  statusTxt.textContent = 'STOPPED';
+  fpsBadge.textContent  = '-- ms/frame';
+  cdWrap.classList.remove('visible');
+
+  // Dim last frame
+  ctx.fillStyle = 'rgba(8,11,15,.55)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Show final stats on overlay
+  finFrames.textContent  = cap(frameCount);
+  finTotal.textContent   = cap(totalDetections);
+  finClasses.textContent = allClasses.size;
+  stoppedOv.classList.add('visible');
+  restartBtn.classList.add('visible');
+}
+
+// ─── Reset ────────────────────────────────────────────────────────────
+function resetSession() {
+  stoppedOv.classList.remove('visible');
+  restartBtn.classList.remove('visible');
+  startBtn.disabled = false;
+  loadTxt.textContent = 'VISION READY';
+  loadSub.textContent = 'Predict every 500ms — low CPU usage';
+  loadingOv.classList.remove('hidden');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  detList.innerHTML = `<div class="empty-state"><div class="empty-icon">⊙</div><div>Awaiting feed…</div></div>`;
+  classWrap.innerHTML = `<div class="empty-state" style="width:100%"><div class="empty-icon" style="font-size:1rem">—</div></div>`;
+  ['total-det','unique-cls','peak-det','frames-proc'].forEach(id => document.getElementById(id).textContent = '0');
+  detCount.textContent = '0';
+}
+
+// ─── Draw ─────────────────────────────────────────────────────────────
+function draw(preds) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  preds.forEach(p => {
+    const [x, y, w, h] = p.bbox;
+    const [stroke, fill] = getColor(p.class);
+    const conf  = (p.score * 100).toFixed(0);
+    const label = p.class.replace(/_/g,' ') + ' ' + conf + '%';
+
+    ctx.fillStyle = fill;
+    ctx.fillRect(x, y, w, h);
+
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+
+    // Corner accents
+    const cs = 12; ctx.lineWidth = 3;
+    [[x,y,1,1],[x+w,y,-1,1],[x,y+h,1,-1],[x+w,y+h,-1,-1]].forEach(([cx,cy,dx,dy]) => {
+      ctx.beginPath();
+      ctx.moveTo(cx+dx*cs, cy); ctx.lineTo(cx, cy); ctx.lineTo(cx, cy+dy*cs);
+      ctx.stroke();
+    });
+
+    const fSize = Math.min(13, Math.max(10, w/12));
+    ctx.font = `500 ${fSize}px 'DM Sans',sans-serif`;
+    const tw = ctx.measureText(label).width;
+    const lh = fSize + 8;
+    const lx = x, ly = y > lh ? y - lh : y + h;
+    ctx.fillStyle = stroke;
+    ctx.fillRect(lx, ly, tw + 12, lh);
+    ctx.fillStyle = '#080b0f';
+    ctx.fillText(label, lx + 6, ly + fSize + 1);
+  });
+}
+
+// ─── Sidebar ──────────────────────────────────────────────────────────
+function updateList(preds) {
+  detCount.textContent = preds.length;
+  if (!preds.length) {
+    detList.innerHTML = `<div class="empty-state"><div class="empty-icon">⊙</div><div>No objects detected</div></div>`;
+    return;
+  }
+  detList.innerHTML = [...preds].sort((a,b)=>b.score-a.score).map(p => {
+    const [stroke, fill] = getColor(p.class);
+    const conf = (p.score*100).toFixed(1);
+    return `<div class="det-item" style="border-color:${stroke}22;background:${fill}">
+      <div class="det-icon">${getIcon(p.class)}</div>
+      <div class="det-info">
+        <div class="det-name">${p.class.replace(/_/g,' ')}</div>
+        <div class="det-conf">${conf}% confidence</div>
+      </div>
+      <div class="cb-wrap"><div class="cb" style="width:${conf}%;background:${stroke}"></div></div>
+    </div>`;
+  }).join('');
+}
+
+function updateTags() {
+  if (!allClasses.size) return;
+  classWrap.innerHTML = [...allClasses].map(c => {
+    const [s] = getColor(c);
+    return `<span class="class-tag" style="color:${s};border-color:${s}40;background:${s}10">${c.replace(/_/g,' ')}</span>`;
+  }).join('');
+}
+
+const cap = n => n > 9999 ? '9999+' : String(n);
+</script>
+</body>
+</html>

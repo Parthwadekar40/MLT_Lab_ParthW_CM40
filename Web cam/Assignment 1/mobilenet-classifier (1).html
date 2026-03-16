@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MobileNet Classifier</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
+<style>
+  body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; background: #111; color: #eee; }
+  h2 { margin-bottom: 16px; }
+  video { width: 480px; border-radius: 8px; border: 2px solid #333; }
+  #results { margin-top: 16px; width: 480px; }
+  .pred { background: #1e1e1e; border-left: 4px solid #00c9a7; padding: 10px 14px; margin: 6px 0; border-radius: 4px; display: flex; justify-content: space-between; }
+  .label { font-size: 15px; }
+  .conf { color: #00c9a7; font-weight: bold; }
+  button { margin-top: 14px; padding: 10px 24px; background: #00c9a7; border: none; color: #111; font-size: 15px; border-radius: 6px; cursor: pointer; }
+  #status { margin-top: 10px; font-size: 13px; color: #888; }
+</style>
+</head>
+<body>
+<h2>MobileNet Object Classifier</h2>
+<video id="cam" autoplay muted playsinline></video>
+<button id="btn">Start Camera</button>
+<div id="status">Idle</div>
+<div id="results"></div>
+
+<script>
+let model, intervalId;
+const video   = document.getElementById('cam');
+const btn     = document.getElementById('btn');
+const status  = document.getElementById('status');
+const results = document.getElementById('results');
+
+btn.addEventListener('click', async () => {
+  if (intervalId) {
+    clearInterval(intervalId);
+    intervalId = null;
+    btn.textContent = 'Start Camera';
+    status.textContent = 'Stopped';
+    return;
+  }
+
+  btn.disabled = true;
+  status.textContent = 'Loading model…';
+  if (!model) model = await mobilenet.load();
+
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  video.srcObject = stream;
+  await video.play();
+
+  btn.disabled = false;
+  btn.textContent = 'Stop';
+  status.textContent = 'Classifying…';
+
+  // Classify every 800ms — avoids hammering CPU
+  intervalId = setInterval(async () => {
+    const preds = await model.classify(video, 3);
+    results.innerHTML = preds.map(p =>
+      `<div class="pred">
+        <span class="label">${p.className.split(',')[0]}</span>
+        <span class="conf">${(p.probability * 100).toFixed(1)}%</span>
+      </div>`
+    ).join('');
+  }, 800);
+});
+</script>
+</body>
+</html>
