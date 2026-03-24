@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Code 2 — Accuracy & Confusion Matrix</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<style>
+  body { font-family: monospace; background: #0f172a; color: #e2e8f0; padding: 24px; max-width: 700px; margin: auto; }
+  h2 { color: #10b981; } .sub { color: #64748b; font-size: 13px; margin-bottom: 20px; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 18px; margin-bottom: 14px; }
+  .lbl { color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+  .btn { background: #059669; color: #fff; border: none; padding: 10px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; font-family: monospace; }
+  .btn:hover { background: #047857; } .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .log { background: #020617; border-radius: 8px; padding: 12px; font-size: 12.5px; max-height: 200px; overflow-y: auto; line-height: 1.9; }
+  .ok { color: #34d399; } .hi { color: #10b981; } .er { color: #f87171; }
+  .bar-wrap { background: #0f172a; border-radius: 99px; height: 8px; margin: 8px 0; }
+  .bar { height: 8px; border-radius: 99px; background: linear-gradient(90deg,#059669,#34d399); transition: width .15s; }
+
+  /* Confusion Matrix */
+  table { border-collapse: collapse; width: 100%; }
+  th { background: #0f172a; color: #64748b; padding: 10px; text-align: center; font-size: 12px; }
+  td { padding: 14px; text-align: center; border: 1px solid #1e293b; font-size: 16px; font-weight: 700; }
+  .diag    { background: #064e3b; color: #34d399; }
+  .offdiag { background: #450a0a; color: #f87171; }
+  .zero    { background: #1e293b; color: #334155; }
+  .rlbl    { color: #818cf8; text-align: left; font-size: 13px; padding-left: 12px; }
+  .clbl    { color: #818cf8; }
+
+  /* Metric strip */
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .mbox { background: #0f172a; border-radius: 8px; padding: 12px; text-align: center; }
+  .mval { font-size: 26px; font-weight: 700; color: #10b981; }
+  .mlbl { font-size: 11px; color: #64748b; margin-top: 3px; text-transform: uppercase; }
+
+  /* Per-class bars */
+  .pc-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+  .pc-name { width: 70px; color: #cbd5e1; }
+  .pc-bar-wrap { flex: 1; background: #0f172a; border-radius: 99px; height: 10px; }
+  .pc-bar { height: 10px; border-radius: 99px; background: #10b981; transition: width .4s; }
+  .pc-pct { width: 45px; text-align: right; color: #34d399; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<h2>Code 2 — Accuracy & Confusion Matrix</h2>
+<p class="sub">Train · evaluate val set · render confusion matrix + per-class accuracy</p>
+
+<div class="card">
+  <div class="lbl">Progress</div>
+  <div class="bar-wrap"><div class="bar" id="bar" style="width:0%"></div></div>
+  <div style="font-size:12px;color:#64748b;margin-bottom:12px;" id="prog">Waiting…</div>
+  <button class="btn" id="btn" onclick="run()">▶ Train &amp; Evaluate</button>
+</div>
+
+<div class="card" id="m-card" style="display:none;">
+  <div class="lbl">Overall Metrics</div>
+  <div class="metrics">
+    <div class="mbox"><div class="mval" id="m-acc">—</div><div class="mlbl">Accuracy</div></div>
+    <div class="mbox"><div class="mval" id="m-cor">—</div><div class="mlbl">Correct</div></div>
+    <div class="mbox"><div class="mval" id="m-time">—</div><div class="mlbl">Train Time</div></div>
+  </div>
+</div>
+
+<div class="card" id="pc-card" style="display:none;">
+  <div class="lbl">Per-Class Accuracy</div>
+  <div id="pc-rows"></div>
+</div>
+
+<div class="card" id="cm-card" style="display:none;">
+  <div class="lbl">Confusion Matrix &nbsp;<span style="font-size:11px;color:#475569;">(rows = Actual · cols = Predicted)</span></div>
+  <table id="cm"></table>
+  <div style="margin-top:10px;font-size:11px;color:#475569;">
+    <span style="color:#34d399;">■</span> Correct &nbsp;
+    <span style="color:#f87171;">■</span> Wrong &nbsp;
+    <span style="color:#334155;">■</span> Zero
+  </div>
+</div>
+
+<div class="card">
+  <div class="lbl">Log</div>
+  <div class="log" id="log">Ready.<br></div>
+</div>
+
+<script>
+const CLASSES = ['Apple','Banana','Orange'];
+const N = 3, DIM = 128, SAMPLES = 150, EPOCHS = 40;
+
+function log(m, c='') {
+  const d = document.getElementById('log');
+  d.innerHTML += `<span class="${c}">${m}</span><br>`;
+  d.scrollTop = d.scrollHeight;
+}
+
+function makeDataset() {
+  return tf.tidy(() => {
+    const per = SAMPLES / N;
+    const xs = [], ys = [];
+    for (let c = 0; c < N; c++) {
+      const bias = tf.oneHot(c, DIM).mul(3.0);
+      const noise = tf.randomNormal([per, DIM], 0, 0.5);
+      xs.push(noise.add(bias));
+      ys.push(tf.fill([per], c, 'int32'));
+    }
+    return { xs: tf.concat(xs), ys: tf.oneHot(tf.concat(ys), N) };
+  });
+}
+
+function renderCM(cm) {
+  document.getElementById('cm-card').style.display = 'block';
+  let h = `<tr><th>↓Act / Pred→</th>`;
+  CLASSES.forEach(c => h += `<th class="clbl">${c}</th>`);
+  h += '</tr>';
+  cm.forEach((row, i) => {
+    h += `<tr><td class="rlbl">${CLASSES[i]}</td>`;
+    row.forEach((v, j) => {
+      const cls = v === 0 ? 'zero' : i === j ? 'diag' : 'offdiag';
+      h += `<td class="${cls}">${v}</td>`;
+    });
+    h += '</tr>';
+  });
+  document.getElementById('cm').innerHTML = h;
+}
+
+function renderPerClass(actual, pred, valN) {
+  document.getElementById('pc-card').style.display = 'block';
+  let h = '';
+  CLASSES.forEach((cls, ci) => {
+    const total = actual.filter(a => a === ci).length;
+    const hits  = actual.filter((a, i) => a === ci && pred[i] === ci).length;
+    const pct   = total > 0 ? Math.round(hits / total * 100) : 0;
+    h += `<div class="pc-row">
+      <div class="pc-name">${cls}</div>
+      <div class="pc-bar-wrap"><div class="pc-bar" style="width:${pct}%"></div></div>
+      <div class="pc-pct">${pct}%</div>
+    </div>`;
+  });
+  document.getElementById('pc-rows').innerHTML = h;
+}
+
+async function run() {
+  document.getElementById('btn').disabled = true;
+  const t0 = performance.now();
+
+  log('Generating dataset…', 'hi');
+  const { xs, ys } = makeDataset();
+  const total = xs.shape[0], trainN = Math.floor(total * 0.8), valN = total - trainN;
+
+  const xTrain = xs.slice([0,0],[trainN,-1]);
+  const yTrain = ys.slice([0,0],[trainN,-1]);
+  const xVal   = xs.slice([trainN,0],[valN,-1]);
+  const yVal   = ys.slice([trainN,0],[valN,-1]);
+  log(`Train: ${trainN} · Val: ${valN}`, 'ok');
+
+  const model = tf.sequential({ layers: [
+    tf.layers.dense({ inputShape: [DIM], units: 32, activation: 'relu' }),
+    tf.layers.dense({ units: N, activation: 'softmax' })
+  ]});
+  model.compile({ optimizer: tf.train.adam(0.01), loss: 'categoricalCrossentropy', metrics: ['accuracy'] });
+
+  log(`Training ${EPOCHS} epochs…`, 'hi');
+  await model.fit(xTrain, yTrain, {
+    epochs: EPOCHS, batchSize: 32,
+    validationData: [xVal, yVal],
+    callbacks: {
+      onEpochEnd(e, logs) {
+        const pct = Math.round(((e+1)/EPOCHS)*100);
+        document.getElementById('bar').style.width = pct + '%';
+        document.getElementById('prog').textContent =
+          `Epoch ${e+1}/${EPOCHS} · acc: ${(logs.acc*100).toFixed(1)}% · val_acc: ${(logs.val_acc*100).toFixed(1)}%`;
+        if ((e+1) % 10 === 0)
+          log(`Epoch ${e+1}: acc=${(logs.acc*100).toFixed(1)}% val_acc=${(logs.val_acc*100).toFixed(1)}%`);
+      }
+    }
+  });
+
+  // Evaluate
+  const predT = model.predict(xVal);
+  const predC = predT.argMax(1).arraySync();
+  const actC  = yVal.argMax(1).arraySync();
+  const correct = predC.filter((p,i) => p===actC[i]).length;
+  const acc = (correct/valN*100).toFixed(1);
+  const elapsed = ((performance.now()-t0)/1000).toFixed(2);
+
+  log(`Accuracy: ${acc}% · ${correct}/${valN} correct`, 'ok');
+  log(`Total time: ${elapsed}s`, 'ok');
+
+  // Confusion matrix data
+  const cm = Array.from({length:N},()=>Array(N).fill(0));
+  actC.forEach((a,i) => cm[a][predC[i]]++);
+
+  renderCM(cm);
+  renderPerClass(actC, predC, valN);
+
+  document.getElementById('m-card').style.display = 'block';
+  document.getElementById('m-acc').textContent = acc+'%';
+  document.getElementById('m-cor').textContent = correct+'/'+valN;
+  document.getElementById('m-time').textContent = elapsed+'s';
+
+  [xs,ys,xTrain,yTrain,xVal,yVal,predT].forEach(t=>t.dispose());
+  document.getElementById('btn').textContent = '✓ Done';
+}
+</script>
+</body>
+</html>

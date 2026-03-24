@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Code 1 — Fast Transfer Learning (3 Fruits)</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<style>
+  body { font-family: monospace; background: #0f172a; color: #e2e8f0; padding: 24px; max-width: 700px; margin: auto; }
+  h2 { color: #818cf8; } .sub { color: #64748b; font-size: 13px; margin-bottom: 20px; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 18px; margin-bottom: 14px; }
+  .lbl { color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+  .btn { background: #4f46e5; color: #fff; border: none; padding: 10px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; font-family: monospace; }
+  .btn:hover { background: #4338ca; } .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .log { background: #020617; border-radius: 8px; padding: 12px; font-size: 12.5px; max-height: 260px; overflow-y: auto; line-height: 1.9; }
+  .ok { color: #34d399; } .hi { color: #818cf8; } .w { color: #fbbf24; }
+  .bar-wrap { background: #0f172a; border-radius: 99px; height: 8px; margin: 8px 0; }
+  .bar { height: 8px; border-radius: 99px; background: linear-gradient(90deg,#4f46e5,#818cf8); transition: width .15s; }
+  .row { display:flex; justify-content:space-between; font-size:13px; padding: 4px 0; border-bottom:1px solid #1e293b; }
+  .val { color: #34d399; font-weight: 700; }
+  .arch { background:#0f172a; border-radius:8px; padding:12px; font-size:13px; line-height:2; color:#cbd5e1; }
+</style>
+</head>
+<body>
+ 
+<h2>Code 1 — Transfer Learning · 3 Fruit Classes</h2>
+<p class="sub">Simulated MobileNet embeddings (128-dim) · tiny head · trains in seconds</p>
+ 
+<div class="card">
+  <div class="lbl">Architecture</div>
+  <div class="arch">
+    Backbone: <span style="color:#818cf8;">Simulated MobileNet (128-dim embedding)</span><br>
+    Head:     Dense(32, relu) → Dense(3, softmax)<br>
+    Loss:     categoricalCrossentropy · Optimizer: Adam(0.01)<br>
+    Data:     150 samples · 3 classes · 80/20 train/val split
+  </div>
+</div>
+ 
+<div class="card">
+  <div class="lbl">Classes</div>
+  <div style="display:flex;gap:10px;margin-bottom:14px;">
+    <span style="background:#312e81;color:#a5b4fc;padding:5px 12px;border-radius:5px;">🍎 Apple</span>
+    <span style="background:#312e81;color:#a5b4fc;padding:5px 12px;border-radius:5px;">🍌 Banana</span>
+    <span style="background:#312e81;color:#a5b4fc;padding:5px 12px;border-radius:5px;">🍊 Orange</span>
+  </div>
+  <div class="lbl">Training Progress</div>
+  <div class="bar-wrap"><div class="bar" id="bar" style="width:0%"></div></div>
+  <div style="font-size:12px;color:#64748b;margin-bottom:12px;" id="prog">Waiting…</div>
+  <button class="btn" id="btn" onclick="run()">▶ Train Model</button>
+</div>
+ 
+<div class="card" id="res" style="display:none;">
+  <div class="lbl">Results</div>
+  <div id="rows"></div>
+</div>
+ 
+<div class="card">
+  <div class="lbl">Log</div>
+  <div class="log" id="log">Ready — click Train Model.<br></div>
+</div>
+ 
+<script>
+const CLASSES = ['Apple','Banana','Orange'];
+const N = 3, DIM = 128, SAMPLES = 150, EPOCHS = 40;
+ 
+function log(m, c='') {
+  const d = document.getElementById('log');
+  d.innerHTML += `<span class="${c}">${m}</span><br>`;
+  d.scrollTop = d.scrollHeight;
+}
+ 
+// Simulate class-separable embeddings (what MobileNet would produce)
+function makeDataset() {
+  return tf.tidy(() => {
+    const perClass = SAMPLES / N;
+    const xParts = [], yParts = [];
+    for (let c = 0; c < N; c++) {
+      // Each class gets a distinct mean vector in embedding space
+      const mean = tf.fill([DIM], 0);
+      const classBias = tf.oneHot(c, DIM).mul(3.0); // strong separation
+      const noise = tf.randomNormal([perClass, DIM], 0, 0.5);
+      const x = noise.add(classBias);
+      const y = tf.fill([perClass], c, 'int32');
+      xParts.push(x); yParts.push(y);
+    }
+    const xs = tf.concat(xParts);
+    const ys = tf.oneHot(tf.concat(yParts), N);
+    return { xs, ys };
+  });
+}
+ 
+async function run() {
+  document.getElementById('btn').disabled = true;
+  log('TF.js backend: ' + tf.getBackend(), 'hi');
+  log('Building simulated embeddings (150 × 128)…');
+ 
+  const { xs, ys } = makeDataset();
+  const total = xs.shape[0];
+  const trainN = Math.floor(total * 0.8);
+  const valN = total - trainN;
+ 
+  const xTrain = xs.slice([0, 0], [trainN, -1]);
+  const yTrain = ys.slice([0, 0], [trainN, -1]);
+  const xVal   = xs.slice([trainN, 0], [valN, -1]);
+  const yVal   = ys.slice([trainN, 0], [valN, -1]);
+ 
+  log(`Train: ${trainN} · Val: ${valN}`, 'ok');
+ 
+  const model = tf.sequential({ layers: [
+    tf.layers.dense({ inputShape: [DIM], units: 32, activation: 'relu' }),
+    tf.layers.dense({ units: N, activation: 'softmax' })
+  ]});
+  model.compile({ optimizer: tf.train.adam(0.01), loss: 'categoricalCrossentropy', metrics: ['accuracy'] });
+ 
+  log(`Training ${EPOCHS} epochs…`, 'hi');
+  const t0 = performance.now();
+ 
+  await model.fit(xTrain, yTrain, {
+    epochs: EPOCHS, batchSize: 32,
+    validationData: [xVal, yVal],
+    callbacks: {
+      onEpochEnd(e, logs) {
+        const pct = Math.round(((e + 1) / EPOCHS) * 100);
+        document.getElementById('bar').style.width = pct + '%';
+        document.getElementById('prog').textContent =
+          `Epoch ${e+1}/${EPOCHS} · loss: ${logs.loss.toFixed(4)} · acc: ${(logs.acc*100).toFixed(1)}% · val_acc: ${(logs.val_acc*100).toFixed(1)}%`;
+        if ((e+1) % 10 === 0)
+          log(`Epoch ${e+1}: loss=${logs.loss.toFixed(4)} acc=${(logs.acc*100).toFixed(1)}% val_acc=${(logs.val_acc*100).toFixed(1)}%`);
+      }
+    }
+  });
+ 
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+  log(`Done in ${elapsed}s`, 'ok');
+ 
+  // Final eval
+  const pred = model.predict(xVal);
+  const predC = pred.argMax(1).arraySync();
+  const actC  = yVal.argMax(1).arraySync();
+  const correct = predC.filter((p, i) => p === actC[i]).length;
+  const acc = (correct / valN * 100).toFixed(1);
+ 
+  log(`Final val accuracy: ${acc}%`, 'ok');
+ 
+  const res = document.getElementById('res');
+  res.style.display = 'block';
+  document.getElementById('rows').innerHTML = `
+    <div class="row"><span>Val Accuracy</span><span class="val">${acc}%</span></div>
+    <div class="row"><span>Correct / Total</span><span class="val">${correct} / ${valN}</span></div>
+    <div class="row"><span>Training Time</span><span class="val">${elapsed}s</span></div>
+    <div class="row"><span>Epochs</span><span class="val">${EPOCHS}</span></div>
+    <div class="row"><span>Embedding Dim</span><span class="val">${DIM}</span></div>
+  `;
+ 
+  [xs, ys, xTrain, yTrain, xVal, yVal, pred].forEach(t => t.dispose());
+  document.getElementById('btn').textContent = '✓ Done';
+}
+</script>
+</body>
+</html>
