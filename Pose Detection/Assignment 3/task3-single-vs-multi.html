@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Task 3 – Single vs Multi Pose Accuracy</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet@2.2.2/dist/posenet.min.js"></script>
+<style>
+  body{margin:0;background:#0f172a;font-family:monospace;color:#fff;display:flex;flex-direction:column;align-items:center;padding:20px;}
+  h2{color:#e879f9;letter-spacing:1px;margin-bottom:4px;}
+  p{font-size:12px;color:#94a3b8;margin:0 0 14px;}
+  #status{font-size:13px;color:#facc15;margin-bottom:12px;}
+  .panels{display:flex;gap:16px;}
+  .panel{display:flex;flex-direction:column;align-items:center;}
+  .panel h3{margin:0 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:0.1em;}
+  .single-h{color:#60a5fa;} .multi-h{color:#f472b6;}
+  canvas{border-radius:8px;display:block;}
+  .stats-row{display:flex;gap:10px;margin-top:8px;width:100%;}
+  .stat{flex:1;background:#1e293b;border-radius:8px;padding:8px 10px;text-align:center;}
+  .stat .n{font-size:22px;font-weight:700;}
+  .stat .l{font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;}
+  #compare{margin-top:16px;background:#1e293b;border-radius:10px;padding:14px 24px;font-size:13px;line-height:1.9;max-width:900px;width:100%;}
+  #compare b{color:#e879f9;}
+  .bar-wrap{width:100%;height:10px;background:#334155;border-radius:99px;overflow:hidden;margin-top:3px;}
+  .bar{height:100%;border-radius:99px;transition:width 0.5s;}
+</style>
+</head>
+<body>
+<h2>Task 3 — Single-Pose vs Multi-Pose Accuracy</h2>
+<p>Both modes run on the same webcam frame simultaneously. Numbers update every second.</p>
+<div id="status">Loading model…</div>
+
+<div class="panels">
+  <!-- Single pose -->
+  <div class="panel">
+    <h3 class="single-h">Single-Pose Detection</h3>
+    <canvas id="c1" width="430" height="320"></canvas>
+    <div class="stats-row">
+      <div class="stat"><div class="n" id="s-conf">—</div><div class="l">Avg Conf %</div></div>
+      <div class="stat"><div class="n" id="s-vis">—</div><div class="l">Visible KPs</div></div>
+      <div class="stat"><div class="n" id="s-fps">—</div><div class="l">ms/frame</div></div>
+    </div>
+  </div>
+
+  <!-- Multi pose -->
+  <div class="panel">
+    <h3 class="multi-h">Multi-Pose Detection</h3>
+    <canvas id="c2" width="430" height="320"></canvas>
+    <div class="stats-row">
+      <div class="stat"><div class="n" id="m-conf">—</div><div class="l">Avg Conf %</div></div>
+      <div class="stat"><div class="n" id="m-vis">—</div><div class="l">Visible KPs</div></div>
+      <div class="stat"><div class="n" id="m-fps">—</div><div class="l">ms/frame</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Comparison panel -->
+<div id="compare">
+  <b>Live Comparison</b><br>
+  <span id="cmp-text">Waiting for data…</span><br><br>
+  Single-Pose confidence &nbsp;<div class="bar-wrap"><div class="bar" id="bar-s" style="background:#60a5fa;width:0%;"></div></div>
+  Multi-Pose &nbsp; confidence &nbsp;<div class="bar-wrap"><div class="bar" id="bar-m" style="background:#f472b6;width:0%;"></div></div>
+</div>
+
+<script>
+const vid = document.createElement('video');
+vid.width=640; vid.height=480; vid.autoplay=true; vid.muted=true; vid.playsInline=true;
+
+const c1 = document.getElementById('c1');
+const c2 = document.getElementById('c2');
+const ctx1 = c1.getContext('2d');
+const ctx2 = c2.getContext('2d');
+const status = document.getElementById('status');
+
+const SKELETON = [
+  [5,6],[5,7],[7,9],[6,8],[8,10],
+  [5,11],[6,12],[11,12],
+  [11,13],[13,15],[12,14],[14,16],
+  [0,1],[0,2],[1,3],[2,4]
+];
+
+// Draws skeleton + dots on a given canvas context, scaled to canvas size
+function drawSkeleton(ctx, kp, color, dotColor, W, H, srcW, srcH) {
+  const sx = W / srcW, sy = H / srcH;
+  SKELETON.forEach(([i, j]) => {
+    if (kp[i].score > 0.4 && kp[j].score > 0.4) {
+      ctx.beginPath();
+      ctx.moveTo(kp[i].position.x * sx, kp[i].position.y * sy);
+      ctx.lineTo(kp[j].position.x * sx, kp[j].position.y * sy);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  });
+  kp.forEach(k => {
+    if (k.score > 0.4) {
+      ctx.beginPath();
+      ctx.arc(k.position.x * sx, k.position.y * sy, 4, 0, 2 * Math.PI);
+      ctx.fillStyle = dotColor;
+      ctx.fill();
+    }
+  });
+}
+
+function drawVideo(ctx, W, H) {
+  ctx.save();
+  ctx.scale(-1, 1);
+  ctx.drawImage(vid, -W, 0, W, H);
+  ctx.restore();
+}
+
+function avgConf(kp) {
+  return kp.reduce((s, k) => s + k.score, 0) / kp.length;
+}
+function visCount(kp, thresh = 0.4) {
+  return kp.filter(k => k.score > thresh).length;
+}
+
+// Rolling history for comparison text
+const history = { sConf: [], mConf: [] };
+function pushHistory(sc, mc) {
+  history.sConf.push(sc); history.mConf.push(mc);
+  if (history.sConf.length > 30) { history.sConf.shift(); history.mConf.shift(); }
+}
+function rollingAvg(arr) {
+  return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+}
+
+async function main() {
+  const net = await posenet.load({
+    architecture: 'MobileNetV1',
+    outputStride: 16,
+    inputResolution: { width: 640, height: 480 },
+    multiplier: 0.75
+  });
+  status.textContent = 'Model ready — starting camera…';
+
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+  vid.srcObject = stream;
+  document.body.appendChild(vid); // needed to decode frames
+  vid.style.display = 'none';
+  await new Promise(r => vid.onloadeddata = r);
+  status.textContent = '● Running both detectors on live feed…';
+
+  async function loop() {
+    // ── Single-pose ──
+    const t1s = performance.now();
+    const single = await net.estimateSinglePose(vid, { flipHorizontal: true });
+    const t1e = performance.now();
+    const singleKP = single.keypoints;
+    const sTime = Math.round(t1e - t1s);
+
+    // ── Multi-pose ──
+    const t2s = performance.now();
+    const multi = await net.estimateMultiplePoses(vid, {
+      flipHorizontal: true,
+      maxDetections: 5,
+      scoreThreshold: 0.4,
+      nmsRadius: 20
+    });
+    const t2e = performance.now();
+    const mTime = Math.round(t2e - t2s);
+
+    // Use best-scoring person from multi
+    const bestPerson = multi.reduce((b, p) =>
+      (!b || p.score > b.score) ? p : b, null);
+
+    // ── Draw single ──
+    drawVideo(ctx1, 430, 320);
+    drawSkeleton(ctx1, singleKP, '#60a5fa', '#facc15', 430, 320, 640, 480);
+    ctx1.font = '11px monospace';
+    ctx1.fillStyle = '#fff';
+    ctx1.fillText('SINGLE', 8, 18);
+
+    // ── Draw multi ──
+    drawVideo(ctx2, 430, 320);
+    const colors = ['#f472b6','#34d399','#fb923c','#a78bfa','#38bdf8'];
+    multi.forEach((person, idx) => {
+      drawSkeleton(ctx2, person.keypoints, colors[idx % colors.length], '#fff', 430, 320, 640, 480);
+      // Label each detected person
+      const nose = person.keypoints[0];
+      if (nose.score > 0.3) {
+        ctx2.font = '11px monospace';
+        ctx2.fillStyle = colors[idx % colors.length];
+        const sx = 430 / 640, sy = 320 / 480;
+        ctx2.fillText(`P${idx+1} ${Math.round(person.score*100)}%`, nose.position.x*sx, nose.position.y*sy - 8);
+      }
+    });
+    ctx2.font = '11px monospace';
+    ctx2.fillStyle = '#fff';
+    ctx2.fillText(`MULTI (${multi.length} person${multi.length!==1?'s':''})`, 8, 18);
+
+    // ── Stats ──
+    const sConf = Math.round(avgConf(singleKP) * 100);
+    const sVis  = visCount(singleKP);
+    document.getElementById('s-conf').textContent = sConf;
+    document.getElementById('s-vis').textContent  = sVis;
+    document.getElementById('s-fps').textContent  = sTime;
+
+    let mConf = 0, mVis = 0;
+    if (bestPerson) {
+      mConf = Math.round(avgConf(bestPerson.keypoints) * 100);
+      mVis  = visCount(bestPerson.keypoints);
+    }
+    document.getElementById('m-conf').textContent = mConf;
+    document.getElementById('m-vis').textContent  = mVis;
+    document.getElementById('m-fps').textContent  = mTime;
+
+    // Bars
+    document.getElementById('bar-s').style.width = sConf + '%';
+    document.getElementById('bar-m').style.width = mConf + '%';
+
+    // Rolling comparison text
+    pushHistory(sConf, mConf);
+    const rsAvg = Math.round(rollingAvg(history.sConf));
+    const rmAvg = Math.round(rollingAvg(history.mConf));
+    const faster = sTime < mTime ? 'Single-pose' : 'Multi-pose';
+    const fasterBy = Math.abs(sTime - mTime);
+    const moreConf = rsAvg >= rmAvg ? 'Single-pose' : 'Multi-pose';
+    const diff = Math.abs(rsAvg - rmAvg);
+
+    document.getElementById('cmp-text').innerHTML =
+      `30-frame avg → Single: <b>${rsAvg}%</b> conf | Multi (best): <b>${rmAvg}%</b> conf<br>` +
+      `<b>${moreConf}</b> is more confident by <b>${diff}%</b> on 1 person.<br>` +
+      `Speed: Single <b>${sTime}ms</b> | Multi <b>${mTime}ms</b> → <b>${faster}</b> is faster by <b>${fasterBy}ms</b><br>` +
+      `Multi detected <b>${multi.length}</b> person(s) this frame.`;
+
+    requestAnimationFrame(loop);
+  }
+
+  loop();
+}
+
+main().catch(e => { status.textContent = 'Error: ' + e.message; console.error(e); });
+</script>
+</body>
+</html>

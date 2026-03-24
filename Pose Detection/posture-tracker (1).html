@@ -1,0 +1,1764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PostureAI — Ergonomics Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --white: #FFFFFF;
+    --bg: #F5F6FA;
+    --surface: #FFFFFF;
+    --surface2: #F0F2F8;
+    --border: #E4E7F0;
+    --text-primary: #0F1117;
+    --text-secondary: #6B7280;
+    --text-tertiary: #9CA3AF;
+    --accent-blue: #3B82F6;
+    --accent-blue-light: #DBEAFE;
+    --accent-green: #10B981;
+    --accent-green-light: #D1FAE5;
+    --accent-amber: #F59E0B;
+    --accent-amber-light: #FEF3C7;
+    --accent-red: #EF4444;
+    --accent-red-light: #FEE2E2;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.07), 0 2px 6px rgba(0,0,0,0.04);
+    --shadow-lg: 0 10px 40px rgba(0,0,0,0.09), 0 4px 12px rgba(0,0,0,0.05);
+    --radius: 16px;
+    --radius-sm: 10px;
+    --radius-xs: 6px;
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+
+  /* Layout */
+  .app-shell {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    grid-template-rows: 64px 1fr;
+    min-height: 100vh;
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+
+  /* Header */
+  .header {
+    grid-column: 1 / -1;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 1.05rem;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+  }
+
+  .logo-icon {
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg, var(--accent-blue), #6366F1);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  /* Live Status Badge */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    transition: all 0.4s ease;
+  }
+
+  .status-badge.optimal {
+    background: var(--accent-green-light);
+    color: #065F46;
+  }
+
+  .status-badge.slouching {
+    background: var(--accent-amber-light);
+    color: #92400E;
+  }
+
+  .status-badge.idle {
+    background: var(--surface2);
+    color: var(--text-secondary);
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    position: relative;
+  }
+
+  .status-badge.optimal .status-dot::after,
+  .status-badge.slouching .status-dot::after {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.25;
+    animation: pulse-ring 1.8s ease-out infinite;
+  }
+
+  @keyframes pulse-ring {
+    0% { transform: scale(0.8); opacity: 0.4; }
+    100% { transform: scale(2.2); opacity: 0; }
+  }
+
+  /* Sidebar */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 24px 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .card-title {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    margin-bottom: 16px;
+  }
+
+  /* Health Score Ring */
+  .score-ring-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .ring-svg { transform: rotate(-90deg); }
+
+  .ring-track {
+    fill: none;
+    stroke: var(--surface2);
+    stroke-width: 8;
+  }
+
+  .ring-fill {
+    fill: none;
+    stroke-width: 8;
+    stroke-linecap: round;
+    stroke: var(--accent-blue);
+    transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+                stroke 0.4s ease;
+  }
+
+  .ring-score-label {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: var(--text-primary);
+    line-height: 1;
+  }
+
+  .ring-sub {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  /* Stat grid */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .stat-item {
+    background: var(--surface2);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+  }
+
+  .stat-val {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+    font-family: 'DM Mono', monospace;
+  }
+
+  .stat-lbl {
+    font-size: 0.69rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    margin-top: 2px;
+    letter-spacing: 0.02em;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-radius: var(--radius-sm);
+    font-size: 0.83rem;
+    font-weight: 600;
+    font-family: 'DM Sans', sans-serif;
+    cursor: pointer;
+    border: none;
+    transition: all 0.18s ease;
+    letter-spacing: 0.01em;
+  }
+
+  .btn-primary {
+    background: var(--accent-blue);
+    color: white;
+    box-shadow: 0 2px 8px rgba(59,130,246,0.35);
+  }
+
+  .btn-primary:hover {
+    background: #2563EB;
+    box-shadow: 0 4px 14px rgba(59,130,246,0.45);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:active { transform: translateY(0); }
+
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+  }
+
+  .btn-secondary:hover {
+    background: var(--border);
+    transform: translateY(-1px);
+  }
+
+  .btn-danger {
+    background: var(--accent-red-light);
+    color: #991B1B;
+    border: 1px solid #FECACA;
+  }
+
+  .btn-danger:hover { background: #FECACA; }
+
+  .btn-full { width: 100%; }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  /* Main content */
+  .main {
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    overflow-y: auto;
+  }
+
+  /* Video section */
+  .video-section {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 20px;
+    align-items: start;
+  }
+
+  .video-wrap {
+    position: relative;
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: #0F1117;
+    box-shadow: var(--shadow-lg);
+    aspect-ratio: 16 / 9;
+    width: 100%;
+  }
+
+  .video-wrap.poor-posture::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius);
+    box-shadow: inset 0 0 0 3px var(--accent-red),
+                inset 0 0 30px rgba(239,68,68,0.25);
+    z-index: 20;
+    pointer-events: none;
+    animation: alert-pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes alert-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  #webcam {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    display: block;
+  }
+
+  #overlay-canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    transform: scaleX(-1);
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* Camera permissions empty state */
+  .camera-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    background: linear-gradient(135deg, #0F1117 0%, #1a1f2e 100%);
+    z-index: 5;
+  }
+
+  .camera-empty-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: rgba(59,130,246,0.15);
+    border: 1.5px solid rgba(59,130,246,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-blue);
+  }
+
+  .camera-empty h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: white;
+    letter-spacing: -0.02em;
+  }
+
+  .camera-empty p {
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.45);
+    text-align: center;
+    max-width: 240px;
+    line-height: 1.5;
+  }
+
+  /* Video controls overlay */
+  .video-controls {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 15;
+  }
+
+  .vc-btn {
+    background: rgba(255,255,255,0.12);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: 'DM Sans', sans-serif;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.18s ease;
+  }
+
+  .vc-btn:hover {
+    background: rgba(255,255,255,0.22);
+    transform: translateY(-1px);
+  }
+
+  .vc-btn.calibrate-active {
+    background: rgba(59,130,246,0.6);
+    border-color: rgba(59,130,246,0.6);
+  }
+
+  .vc-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  /* Calibration indicator */
+  .calibration-indicator {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    background: rgba(16,185,129,0.85);
+    backdrop-filter: blur(8px);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    display: none;
+    align-items: center;
+    gap: 5px;
+    z-index: 15;
+  }
+
+  .calibration-indicator.visible { display: flex; }
+
+  /* Loading indicator */
+  .model-loading {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    background: rgba(0,0,0,0.65);
+    backdrop-filter: blur(8px);
+    color: white;
+    padding: 7px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 15;
+  }
+
+  .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.25);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Side panel next to video */
+  .posture-panel {
+    width: 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  /* Alert card */
+  .alert-card {
+    border-radius: var(--radius);
+    padding: 16px;
+    border: 1px solid;
+    transition: all 0.4s ease;
+  }
+
+  .alert-card.good {
+    background: var(--accent-green-light);
+    border-color: #A7F3D0;
+    color: #065F46;
+  }
+
+  .alert-card.warn {
+    background: var(--accent-amber-light);
+    border-color: #FDE68A;
+    color: #92400E;
+  }
+
+  .alert-card.bad {
+    background: var(--accent-red-light);
+    border-color: #FECACA;
+    color: #991B1B;
+  }
+
+  .alert-card.neutral {
+    background: var(--surface2);
+    border-color: var(--border);
+    color: var(--text-secondary);
+  }
+
+  .alert-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+    letter-spacing: -0.01em;
+  }
+
+  .alert-desc {
+    font-size: 0.72rem;
+    line-height: 1.5;
+    opacity: 0.85;
+  }
+
+  /* Issue list */
+  .issue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .issue-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.76rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    padding: 8px 10px;
+    background: var(--surface2);
+    border-radius: var(--radius-xs);
+    border-left: 3px solid var(--border);
+    transition: all 0.3s ease;
+  }
+
+  .issue-item.active-issue {
+    background: var(--accent-amber-light);
+    color: #92400E;
+    border-left-color: var(--accent-amber);
+  }
+
+  /* History table */
+  .history-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .history-table th {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .history-table td {
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'DM Mono', monospace;
+  }
+
+  .history-table tr:last-child td { border-bottom: none; }
+
+  .history-table tr:hover td { background: var(--surface2); }
+
+  .score-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-family: 'DM Sans', monospace;
+  }
+
+  .score-pill.high { background: var(--accent-green-light); color: #065F46; }
+  .score-pill.mid  { background: var(--accent-amber-light); color: #92400E; }
+  .score-pill.low  { background: var(--accent-red-light); color: #991B1B; }
+
+  /* Empty history */
+  .empty-history {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 32px 16px;
+    color: var(--text-tertiary);
+  }
+
+  .empty-history p { font-size: 0.8rem; text-align: center; line-height: 1.5; }
+
+  /* Progress bar */
+  .progress-bar-wrap {
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent-blue), #6366F1);
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Timer display */
+  .timer-display {
+    font-family: 'DM Mono', monospace;
+    font-size: 1.4rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+  }
+
+  /* Model status chip */
+  .model-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--surface2);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+  }
+
+  .model-chip.ready {
+    background: var(--accent-blue-light);
+    color: #1E40AF;
+    border-color: #BFDBFE;
+  }
+
+  .chip-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* Responsive */
+  @media (max-width: 1100px) {
+    .app-shell { grid-template-columns: 260px 1fr; }
+  }
+
+  @media (max-width: 900px) {
+    .app-shell { grid-template-columns: 1fr; }
+    .sidebar { border-right: none; border-bottom: 1px solid var(--border); }
+    .video-section { grid-template-columns: 1fr; }
+    .posture-panel { width: 100%; flex-direction: row; flex-wrap: wrap; }
+    .posture-panel > * { flex: 1; min-width: 180px; }
+  }
+
+  /* Toast notification */
+  .toast-wrap {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .toast {
+    background: var(--text-primary);
+    color: white;
+    padding: 12px 18px;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    font-weight: 500;
+    box-shadow: var(--shadow-lg);
+    animation: toast-in 0.3s ease, toast-out 0.3s ease 2.7s forwards;
+    max-width: 280px;
+  }
+
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes toast-out {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-8px); }
+  }
+
+  /* FPS chip */
+  .fps-chip {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px);
+    color: rgba(255,255,255,0.7);
+    font-size: 0.65rem;
+    font-family: 'DM Mono', monospace;
+    padding: 4px 8px;
+    border-radius: 6px;
+    z-index: 15;
+    display: none;
+  }
+
+  .fps-chip.visible { display: block; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="5" r="1"/><path d="M9 20l3-15 3 15"/><path d="M6 8a6 6 0 0 0 12 0"/>
+        </svg>
+      </div>
+      PostureAI
+    </div>
+    <div class="header-right">
+      <span class="model-chip" id="model-chip">
+        <span class="chip-dot"></span>
+        Loading Model…
+      </span>
+      <div class="status-badge idle" id="status-badge">
+        <span class="status-dot"></span>
+        <span id="status-text">Inactive</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <!-- Health Score Card -->
+    <div class="card">
+      <div class="card-title">Health Score</div>
+      <div class="score-ring-wrap">
+        <div style="position:relative;width:120px;height:120px;">
+          <svg class="ring-svg" width="120" height="120" viewBox="0 0 120 120">
+            <circle class="ring-track" cx="60" cy="60" r="50"/>
+            <circle class="ring-fill" id="ring-fill" cx="60" cy="60" r="50"
+              stroke-dasharray="314.16"
+              stroke-dashoffset="314.16"/>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
+            <span class="ring-score-label" id="score-label">0</span>
+            <span class="ring-sub">/ 100</span>
+          </div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:0.8rem;font-weight:600;color:var(--text-primary)" id="score-desc">Start a session to track</div>
+          <div style="font-size:0.7rem;color:var(--text-tertiary);margin-top:3px;">Real-time posture score</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Session Stats -->
+    <div class="card">
+      <div class="card-title">Session Stats</div>
+      <div class="stat-grid">
+        <div class="stat-item">
+          <div class="timer-display" id="session-timer" style="font-size:1.1rem">00:00</div>
+          <div class="stat-lbl">Focus Time</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-val" id="alert-count">0</div>
+          <div class="stat-lbl">Alerts</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-val" id="optimal-pct">—</div>
+          <div class="stat-lbl">Optimal %</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-val" id="slouch-pct">—</div>
+          <div class="stat-lbl">Slouching</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Daily Goal -->
+    <div class="card">
+      <div class="card-title">Daily Goal</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <span style="font-size:0.82rem;font-weight:600;color:var(--text-primary)">Good Posture Time</span>
+        <span style="font-size:0.82rem;font-family:'DM Mono',monospace;font-weight:600;color:var(--accent-blue)" id="goal-display">0 / 30 min</span>
+      </div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="goal-bar" style="width:0%"></div>
+      </div>
+      <div style="font-size:0.68rem;color:var(--text-tertiary);margin-top:8px;">Daily goal: 30 minutes of good posture</div>
+    </div>
+
+    <!-- Session Controls -->
+    <div class="card">
+      <div class="card-title">Controls</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button class="btn btn-primary btn-full" id="btn-start">
+          <i data-lucide="play" style="width:14px;height:14px"></i>
+          Start Session
+        </button>
+        <button class="btn btn-secondary btn-full" id="btn-stop" disabled>
+          <i data-lucide="square" style="width:14px;height:14px"></i>
+          End Session
+        </button>
+        <button class="btn btn-danger btn-full" id="btn-clear-history" style="margin-top:4px;">
+          <i data-lucide="trash-2" style="width:14px;height:14px"></i>
+          Clear History
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- Video + Panel -->
+    <div class="video-section">
+      <!-- Video -->
+      <div class="video-wrap" id="video-wrap">
+        <!-- Camera empty state -->
+        <div class="camera-empty" id="camera-empty">
+          <div class="camera-icon-anim">
+            <div class="camera-empty-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                <circle cx="12" cy="13" r="4"/>
+              </svg>
+            </div>
+          </div>
+          <h3>Camera Access Required</h3>
+          <p>Click "Start Session" to enable your camera and begin real-time posture analysis.</p>
+          <button class="vc-btn" onclick="document.getElementById('btn-start').click()" style="margin-top:4px;background:rgba(59,130,246,0.5);border-color:rgba(59,130,246,0.5)">
+            <i data-lucide="camera" style="width:13px;height:13px"></i>
+            Enable Camera
+          </button>
+        </div>
+
+        <!-- Model loading indicator -->
+        <div class="model-loading" id="model-loading" style="display:none;">
+          <div class="spinner"></div>
+          <span>Loading AI model…</span>
+        </div>
+
+        <!-- FPS -->
+        <div class="fps-chip" id="fps-chip">0 fps</div>
+
+        <!-- Calibration success -->
+        <div class="calibration-indicator" id="calib-indicator">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Calibrated
+        </div>
+
+        <video id="webcam" autoplay muted playsinline></video>
+        <canvas id="overlay-canvas"></canvas>
+
+        <!-- Video controls overlay -->
+        <div class="video-controls" id="video-controls" style="display:none;">
+          <button class="vc-btn" id="btn-calibrate" disabled>
+            <i data-lucide="crosshair" style="width:13px;height:13px"></i>
+            Calibrate Posture
+          </button>
+          <button class="vc-btn" id="btn-toggle-skeleton">
+            <i data-lucide="eye" style="width:13px;height:13px"></i>
+            Skeleton
+          </button>
+        </div>
+      </div>
+
+      <!-- Posture Panel -->
+      <div class="posture-panel" id="posture-panel">
+        <!-- Status card -->
+        <div class="alert-card neutral" id="alert-card">
+          <div class="alert-title" id="alert-title">Waiting…</div>
+          <div class="alert-desc" id="alert-desc">Start a session to begin posture analysis.</div>
+        </div>
+
+        <!-- Issues detected -->
+        <div class="card" style="padding:16px;">
+          <div class="card-title" style="margin-bottom:12px;">Detected Issues</div>
+          <div class="issue-list">
+            <div class="issue-item" id="issue-slouch">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 1 10 10"/><path d="M12 2a10 10 0 0 0-10 10"/><path d="M12 12v6"/><path d="M12 12l4-4"/></svg>
+              Slouching
+            </div>
+            <div class="issue-item" id="issue-head">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M12 12v4"/><path d="M8 20h8"/></svg>
+              Forward Head
+            </div>
+            <div class="issue-item" id="issue-asymmetry">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+              Shoulder Tilt
+            </div>
+          </div>
+        </div>
+
+        <!-- Calibration card -->
+        <div class="card" style="padding:16px;">
+          <div class="card-title" style="margin-bottom:10px;">Calibration</div>
+          <div style="font-size:0.76rem;color:var(--text-secondary);line-height:1.5;margin-bottom:12px;" id="calib-status-text">
+            Not calibrated. Sit upright and click Calibrate.
+          </div>
+          <button class="btn btn-primary btn-full" id="btn-calibrate2" disabled style="font-size:0.76rem;padding:8px 14px;">
+            <i data-lucide="target" style="width:12px;height:12px"></i>
+            Calibrate Now
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Session History -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div class="card-title" style="margin-bottom:0;">Session History</div>
+        <span style="font-size:0.72rem;color:var(--text-tertiary);" id="history-count">0 sessions</span>
+      </div>
+      <div id="history-container">
+        <div class="empty-history">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--border)">
+            <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 9h6"/><path d="M9 12h6"/><path d="M9 15h4"/>
+          </svg>
+          <p>No sessions recorded yet.<br/>Complete a session to see your history here.</p>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Toast container -->
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<script>
+// =====================================================================
+// INDEXEDDB WRAPPER
+// =====================================================================
+const DB = (() => {
+  const DB_NAME = 'PostureAI_DB';
+  const DB_VERSION = 1;
+  const STORE_NAME = 'sessions';
+  let db = null;
+
+  function open() {
+    return new Promise((resolve, reject) => {
+      if (db) return resolve(db);
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = (e) => {
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains(STORE_NAME)) {
+          const store = d.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+          store.createIndex('date', 'date', { unique: false });
+        }
+      };
+      req.onsuccess = (e) => { db = e.target.result; resolve(db); };
+      req.onerror = (e) => reject(e.target.error);
+    });
+  }
+
+  async function addSession(record) {
+    const d = await open();
+    return new Promise((resolve, reject) => {
+      const tx = d.transaction(STORE_NAME, 'readwrite');
+      const req = tx.objectStore(STORE_NAME).add(record);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function getAllSessions() {
+    const d = await open();
+    return new Promise((resolve, reject) => {
+      const tx = d.transaction(STORE_NAME, 'readonly');
+      const req = tx.objectStore(STORE_NAME).getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function clearSessions() {
+    const d = await open();
+    return new Promise((resolve, reject) => {
+      const tx = d.transaction(STORE_NAME, 'readwrite');
+      const req = tx.objectStore(STORE_NAME).clear();
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  return { addSession, getAllSessions, clearSessions };
+})();
+
+// =====================================================================
+// APP STATE
+// =====================================================================
+const state = {
+  isRunning: false,
+  detector: null,
+  modelReady: false,
+  animFrameId: null,
+  showSkeleton: true,
+  calibrated: false,
+  baseline: null,           // { noseY, leftEarY, rightEarY, leftShoulderY, rightShoulderY, leftShoulderX, rightShoulderX, leftEarX, rightEarX }
+  currentPosture: 'idle',   // idle | optimal | slouching | forward_head
+  poorPostureStart: null,   // timestamp when poor posture began
+  alertActive: false,
+  alertCount: 0,
+  sessionStart: null,
+  sessionTimerInterval: null,
+  frames: 0,
+  goodFrames: 0,
+  totalFrames: 0,
+  slouchFrames: 0,
+  fpsAccum: 0,
+  fpsLastTime: 0,
+  fpsCount: 0,
+  goodPostureMinutes: 0,
+  scoreHistory: [],         // rolling window of scores
+};
+
+// =====================================================================
+// DOM REFS
+// =====================================================================
+const videoEl   = document.getElementById('webcam');
+const canvas    = document.getElementById('overlay-canvas');
+const ctx       = canvas.getContext('2d');
+const videoWrap = document.getElementById('video-wrap');
+
+const btnStart      = document.getElementById('btn-start');
+const btnStop       = document.getElementById('btn-stop');
+const btnCalibrate  = document.getElementById('btn-calibrate');
+const btnCalibrate2 = document.getElementById('btn-calibrate2');
+const btnToggleSkel = document.getElementById('btn-toggle-skeleton');
+const btnClearHist  = document.getElementById('btn-clear-history');
+
+const statusBadge   = document.getElementById('status-badge');
+const statusText    = document.getElementById('status-text');
+const modelChip     = document.getElementById('model-chip');
+const cameraEmpty   = document.getElementById('camera-empty');
+const videoControls = document.getElementById('video-controls');
+const calibIndicator= document.getElementById('calib-indicator');
+const modelLoading  = document.getElementById('model-loading');
+const fpsChi        = document.getElementById('fps-chip');
+
+const scoreLabel    = document.getElementById('score-label');
+const ringFill      = document.getElementById('ring-fill');
+const scoreDesc     = document.getElementById('score-desc');
+const sessionTimer  = document.getElementById('session-timer');
+const alertCount    = document.getElementById('alert-count');
+const optimalPct    = document.getElementById('optimal-pct');
+const slouchPct     = document.getElementById('slouch-pct');
+const goalDisplay   = document.getElementById('goal-display');
+const goalBar       = document.getElementById('goal-bar');
+const calibStatusTxt= document.getElementById('calib-status-text');
+
+const alertCard     = document.getElementById('alert-card');
+const alertTitle    = document.getElementById('alert-title');
+const alertDesc     = document.getElementById('alert-desc');
+
+const issueSlouch   = document.getElementById('issue-slouch');
+const issueHead     = document.getElementById('issue-head');
+const issueAsym     = document.getElementById('issue-asymmetry');
+
+const historyContainer = document.getElementById('history-container');
+const historyCount     = document.getElementById('history-count');
+
+// =====================================================================
+// KEYPOINT INDICES (MoveNet 17 keypoints)
+// =====================================================================
+const KP = {
+  NOSE: 0, LEFT_EYE: 1, RIGHT_EYE: 2,
+  LEFT_EAR: 3, RIGHT_EAR: 4,
+  LEFT_SHOULDER: 5, RIGHT_SHOULDER: 6,
+  LEFT_ELBOW: 7, RIGHT_ELBOW: 8,
+  LEFT_WRIST: 9, RIGHT_WRIST: 10,
+  LEFT_HIP: 11, RIGHT_HIP: 12,
+  LEFT_KNEE: 13, RIGHT_KNEE: 14,
+  LEFT_ANKLE: 15, RIGHT_ANKLE: 16
+};
+
+const SKELETON_CONNECTIONS = [
+  [KP.NOSE, KP.LEFT_EYE], [KP.NOSE, KP.RIGHT_EYE],
+  [KP.LEFT_EYE, KP.LEFT_EAR], [KP.RIGHT_EYE, KP.RIGHT_EAR],
+  [KP.LEFT_EAR, KP.LEFT_SHOULDER], [KP.RIGHT_EAR, KP.RIGHT_SHOULDER],
+  [KP.LEFT_SHOULDER, KP.RIGHT_SHOULDER],
+  [KP.LEFT_SHOULDER, KP.LEFT_ELBOW], [KP.RIGHT_SHOULDER, KP.RIGHT_ELBOW],
+  [KP.LEFT_ELBOW, KP.LEFT_WRIST], [KP.RIGHT_ELBOW, KP.RIGHT_WRIST],
+  [KP.LEFT_SHOULDER, KP.LEFT_HIP], [KP.RIGHT_SHOULDER, KP.RIGHT_HIP],
+  [KP.LEFT_HIP, KP.RIGHT_HIP],
+  [KP.LEFT_HIP, KP.LEFT_KNEE], [KP.RIGHT_HIP, KP.RIGHT_KNEE],
+  [KP.LEFT_KNEE, KP.LEFT_ANKLE], [KP.RIGHT_KNEE, KP.RIGHT_ANKLE]
+];
+
+// =====================================================================
+// INIT TENSORFLOW MODEL
+// =====================================================================
+async function initModel() {
+  modelLoading.style.display = 'flex';
+  try {
+    await tf.ready();
+    await tf.setBackend('webgl');
+
+    const detectorConfig = {
+      modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+      enableSmoothing: true,
+      minPoseScore: 0.25
+    };
+    state.detector = await poseDetection.createDetector(
+      poseDetection.SupportedModels.MoveNet,
+      detectorConfig
+    );
+
+    state.modelReady = true;
+    modelLoading.style.display = 'none';
+    modelChip.className = 'model-chip ready';
+    modelChip.innerHTML = '<span class="chip-dot"></span> MoveNet Ready';
+    showToast('AI model loaded — ready to track posture');
+  } catch (err) {
+    modelLoading.style.display = 'none';
+    modelChip.innerHTML = '<span class="chip-dot" style="background:#EF4444"></span> Model Error';
+    showToast('Failed to load AI model: ' + err.message);
+    console.error('Model init error:', err);
+  }
+}
+
+// =====================================================================
+// WEBCAM
+// =====================================================================
+async function startWebcam() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      audio: false
+    });
+    videoEl.srcObject = stream;
+    await new Promise(resolve => videoEl.addEventListener('loadedmetadata', resolve, { once: true }));
+    await videoEl.play();
+    canvas.width = videoEl.videoWidth;
+    canvas.height = videoEl.videoHeight;
+    return true;
+  } catch (err) {
+    showToast('Camera access denied: ' + err.message);
+    return false;
+  }
+}
+
+function stopWebcam() {
+  if (videoEl.srcObject) {
+    videoEl.srcObject.getTracks().forEach(t => t.stop());
+    videoEl.srcObject = null;
+  }
+}
+
+// =====================================================================
+// POSTURE ANALYSIS
+// =====================================================================
+function getKP(keypoints, idx) {
+  const kp = keypoints[idx];
+  return (kp && kp.score > 0.3) ? kp : null;
+}
+
+function calibrate(keypoints) {
+  const nose  = getKP(keypoints, KP.NOSE);
+  const lEar  = getKP(keypoints, KP.LEFT_EAR);
+  const rEar  = getKP(keypoints, KP.RIGHT_EAR);
+  const lSho  = getKP(keypoints, KP.LEFT_SHOULDER);
+  const rSho  = getKP(keypoints, KP.RIGHT_SHOULDER);
+
+  if (!nose || !lEar || !rEar || !lSho || !rSho) {
+    showToast('Could not detect all keypoints — ensure face & shoulders are visible');
+    return false;
+  }
+
+  state.baseline = {
+    noseY:       nose.y,
+    noseX:       nose.x,
+    leftEarY:    lEar.y,
+    rightEarY:   rEar.y,
+    leftEarX:    lEar.x,
+    rightEarX:   rEar.x,
+    leftShoulderY:  lSho.y,
+    rightShoulderY: rSho.y,
+    leftShoulderX:  lSho.x,
+    rightShoulderX: rSho.x,
+    shoulderWidth: Math.abs(lSho.x - rSho.x),
+  };
+  state.calibrated = true;
+  return true;
+}
+
+function analyzePosture(keypoints) {
+  if (!state.calibrated || !state.baseline) return { status: 'idle', issues: [] };
+
+  const b = state.baseline;
+  const lSho = getKP(keypoints, KP.LEFT_SHOULDER);
+  const rSho = getKP(keypoints, KP.RIGHT_SHOULDER);
+  const lEar = getKP(keypoints, KP.LEFT_EAR);
+  const rEar = getKP(keypoints, KP.RIGHT_EAR);
+  const nose = getKP(keypoints, KP.NOSE);
+
+  if (!lSho && !rSho) return { status: 'idle', issues: [] };
+
+  const issues = { slouching: false, forwardHead: false, asymmetry: false };
+
+  // --- SLOUCHING: shoulders drop (y increases in image coords)
+  const threshold = b.shoulderWidth * 0.15;
+  if (lSho && lSho.y > b.leftShoulderY + threshold) issues.slouching = true;
+  if (rSho && rSho.y > b.rightShoulderY + threshold) issues.slouching = true;
+
+  // --- FORWARD HEAD: ear moves forward relative to shoulder in X,
+  //     and/or ear Y drops relative to shoulder Y
+  if (lEar && lSho) {
+    const baseEarShoulderYDiff = b.leftEarY - b.leftShoulderY;
+    const currEarShoulderYDiff = lEar.y - lSho.y;
+    // If ear is dropping toward shoulder significantly
+    if (currEarShoulderYDiff > baseEarShoulderYDiff + threshold * 0.7) issues.forwardHead = true;
+    // Also check horizontal displacement (ear moves away from shoulder in x)
+    const baseXDiff = Math.abs(b.leftEarX - b.leftShoulderX);
+    const currXDiff = Math.abs(lEar.x - lSho.x);
+    if (currXDiff > baseXDiff + threshold) issues.forwardHead = true;
+  }
+  if (rEar && rSho) {
+    const baseEarShoulderYDiff = b.rightEarY - b.rightShoulderY;
+    const currEarShoulderYDiff = rEar.y - rSho.y;
+    if (currEarShoulderYDiff > baseEarShoulderYDiff + threshold * 0.7) issues.forwardHead = true;
+    const baseXDiff = Math.abs(b.rightEarX - b.rightShoulderX);
+    const currXDiff = Math.abs(rEar.x - rSho.x);
+    if (currXDiff > baseXDiff + threshold) issues.forwardHead = true;
+  }
+
+  // --- ASYMMETRY: shoulder tilt
+  if (lSho && rSho) {
+    const currTilt = Math.abs(lSho.y - rSho.y);
+    const baseTilt = Math.abs(b.leftShoulderY - b.rightShoulderY);
+    if (currTilt > baseTilt + threshold * 1.2) issues.asymmetry = true;
+  }
+
+  const anyIssue = issues.slouching || issues.forwardHead || issues.asymmetry;
+  return { status: anyIssue ? 'poor' : 'optimal', issues };
+}
+
+// =====================================================================
+// SKELETON DRAWING
+// =====================================================================
+function drawSkeleton(keypoints) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  if (!state.showSkeleton) return;
+
+  // Draw connections
+  ctx.save();
+  for (const [a, b] of SKELETON_CONNECTIONS) {
+    const kpA = keypoints[a];
+    const kpB = keypoints[b];
+    if (!kpA || !kpB || kpA.score < 0.3 || kpB.score < 0.3) continue;
+
+    // Mirror x
+    const x1 = w - kpA.x, y1 = kpA.y;
+    const x2 = w - kpB.x, y2 = kpB.y;
+
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.strokeStyle = state.alertActive ? 'rgba(239,68,68,0.45)' : 'rgba(96,165,250,0.45)';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+
+  // Draw keypoints
+  for (const kp of keypoints) {
+    if (!kp || kp.score < 0.3) continue;
+    const x = w - kp.x;
+    const y = kp.y;
+
+    // Outer glow
+    ctx.beginPath();
+    ctx.arc(x, y, 7, 0, Math.PI * 2);
+    ctx.fillStyle = state.alertActive ? 'rgba(239,68,68,0.15)' : 'rgba(96,165,250,0.15)';
+    ctx.fill();
+
+    // Dot
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = state.alertActive ? '#EF4444' : '#60a5fa';
+    ctx.fill();
+
+    // White center
+    ctx.beginPath();
+    ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// =====================================================================
+// POSTURE DETECTION LOOP
+// =====================================================================
+async function detectionLoop() {
+  if (!state.isRunning) return;
+
+  const now = performance.now();
+
+  // FPS
+  state.fpsCount++;
+  if (now - state.fpsLastTime >= 1000) {
+    fpsChi.textContent = state.fpsCount + ' fps';
+    state.fpsCount = 0;
+    state.fpsLastTime = now;
+  }
+
+  if (videoEl.readyState >= 2 && state.detector) {
+    try {
+      const poses = await state.detector.estimatePoses(videoEl, {
+        maxPoses: 1,
+        flipHorizontal: false,
+      });
+
+      if (poses && poses.length > 0) {
+        const keypoints = poses[0].keypoints;
+
+        // Draw skeleton
+        drawSkeleton(keypoints);
+
+        if (state.calibrated) {
+          const { status, issues } = analyzePosture(keypoints);
+
+          state.totalFrames++;
+          const isOptimal = status === 'optimal';
+
+          if (isOptimal) {
+            state.goodFrames++;
+            state.currentPosture = 'optimal';
+            state.poorPostureStart = null;
+
+            if (state.alertActive) {
+              state.alertActive = false;
+              videoWrap.classList.remove('poor-posture');
+            }
+          } else if (status === 'poor') {
+            state.slouchFrames++;
+            state.currentPosture = 'poor';
+
+            if (!state.poorPostureStart) {
+              state.poorPostureStart = now;
+            } else if (now - state.poorPostureStart > 3000 && !state.alertActive) {
+              state.alertActive = true;
+              state.alertCount++;
+              alertCount.textContent = state.alertCount;
+              videoWrap.classList.add('poor-posture');
+            }
+          }
+
+          // Update issues UI
+          issueSlouch.classList.toggle('active-issue', !!issues.slouching);
+          issueHead.classList.toggle('active-issue', !!issues.forwardHead);
+          issueAsym.classList.toggle('active-issue', !!issues.asymmetry);
+
+          updateStatusUI(status, issues);
+          updateScore();
+        } else {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          drawSkeleton(keypoints);
+        }
+      } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    } catch (err) {
+      // silently handle frame errors
+    }
+  }
+
+  state.animFrameId = requestAnimationFrame(detectionLoop);
+}
+
+// =====================================================================
+// UI UPDATES
+// =====================================================================
+function updateStatusUI(status, issues) {
+  if (status === 'optimal') {
+    statusBadge.className = 'status-badge optimal';
+    statusText.textContent = 'Optimal';
+
+    alertCard.className = 'alert-card good';
+    alertTitle.textContent = '✓ Good Posture';
+    alertDesc.textContent = 'Spine aligned, shoulders level. Keep it up!';
+  } else if (status === 'poor') {
+    const issueNames = [];
+    if (issues.slouching)   issueNames.push('Slouching');
+    if (issues.forwardHead) issueNames.push('Forward Head');
+    if (issues.asymmetry)   issueNames.push('Shoulder Tilt');
+
+    if (state.alertActive) {
+      statusBadge.className = 'status-badge slouching';
+      statusText.textContent = 'Correction Needed';
+      alertCard.className = 'alert-card bad';
+      alertTitle.textContent = '⚠ Posture Alert';
+      alertDesc.textContent = issueNames.join(', ') + ' — please correct your position.';
+    } else {
+      statusBadge.className = 'status-badge slouching';
+      statusText.textContent = 'Slouching';
+      alertCard.className = 'alert-card warn';
+      alertTitle.textContent = '⚑ Slouching Detected';
+      alertDesc.textContent = issueNames.join(', ') + ' detected. Sit up straight.';
+    }
+  } else {
+    statusBadge.className = 'status-badge idle';
+    statusText.textContent = 'Inactive';
+    alertCard.className = 'alert-card neutral';
+    alertTitle.textContent = 'Waiting…';
+    alertDesc.textContent = 'Calibrate to begin posture analysis.';
+  }
+}
+
+function updateScore() {
+  if (state.totalFrames === 0) return;
+
+  const raw = (state.goodFrames / state.totalFrames) * 100;
+  // Rolling window for smoother score
+  state.scoreHistory.push(raw);
+  if (state.scoreHistory.length > 60) state.scoreHistory.shift();
+  const score = Math.round(state.scoreHistory.reduce((a, b) => a + b, 0) / state.scoreHistory.length);
+
+  scoreLabel.textContent = score;
+
+  // Ring
+  const circumference = 314.16;
+  const offset = circumference - (score / 100) * circumference;
+  ringFill.style.strokeDashoffset = offset;
+
+  // Color
+  if (score >= 80) {
+    ringFill.style.stroke = '#10B981';
+    scoreDesc.textContent = 'Excellent posture!';
+    scoreDesc.style.color = '#065F46';
+  } else if (score >= 60) {
+    ringFill.style.stroke = '#3B82F6';
+    scoreDesc.textContent = 'Good posture';
+    scoreDesc.style.color = 'var(--text-primary)';
+  } else if (score >= 40) {
+    ringFill.style.stroke = '#F59E0B';
+    scoreDesc.textContent = 'Needs improvement';
+    scoreDesc.style.color = '#92400E';
+  } else {
+    ringFill.style.stroke = '#EF4444';
+    scoreDesc.textContent = 'Poor posture';
+    scoreDesc.style.color = '#991B1B';
+  }
+
+  // Pct stats
+  const oPct = Math.round((state.goodFrames / state.totalFrames) * 100);
+  const sPct = Math.round((state.slouchFrames / state.totalFrames) * 100);
+  optimalPct.textContent = oPct + '%';
+  slouchPct.textContent = sPct + '%';
+
+  // Goal: good posture seconds
+  state.goodPostureMinutes = (state.goodFrames / 30) / 60; // approx 30fps
+  const goalMin = Math.min(state.goodPostureMinutes, 30);
+  goalDisplay.textContent = goalMin.toFixed(1) + ' / 30 min';
+  goalBar.style.width = Math.min((goalMin / 30) * 100, 100) + '%';
+}
+
+function updateSessionTimer() {
+  if (!state.sessionStart) return;
+  const elapsed = Math.floor((Date.now() - state.sessionStart) / 1000);
+  const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const s = String(elapsed % 60).padStart(2, '0');
+  sessionTimer.textContent = m + ':' + s;
+}
+
+// =====================================================================
+// SESSION START / STOP
+// =====================================================================
+async function startSession() {
+  btnStart.disabled = true;
+  btnStart.innerHTML = '<div class="spinner" style="border-color:rgba(255,255,255,0.3);border-top-color:white;width:13px;height:13px"></div> Starting…';
+
+  const ok = await startWebcam();
+  if (!ok) {
+    btnStart.disabled = false;
+    btnStart.innerHTML = '<i data-lucide="play" style="width:14px;height:14px"></i> Start Session';
+    lucide.createIcons();
+    return;
+  }
+
+  // Reset state
+  state.isRunning = true;
+  state.calibrated = false;
+  state.baseline = null;
+  state.alertActive = false;
+  state.alertCount = 0;
+  state.goodFrames = 0;
+  state.totalFrames = 0;
+  state.slouchFrames = 0;
+  state.poorPostureStart = null;
+  state.scoreHistory = [];
+  state.sessionStart = Date.now();
+  state.goodPostureMinutes = 0;
+  state.fpsCount = 0;
+  state.fpsLastTime = performance.now();
+
+  // UI
+  cameraEmpty.style.display = 'none';
+  videoControls.style.display = 'flex';
+  fpsChi.classList.add('visible');
+  btnStop.disabled = false;
+  btnCalibrate.disabled = false;
+  btnCalibrate2.disabled = false;
+  btnStart.disabled = true;
+
+  // Update btn
+  btnStart.innerHTML = '<i data-lucide="play" style="width:14px;height:14px"></i> Running…';
+
+  statusBadge.className = 'status-badge idle';
+  statusText.textContent = 'Tracking';
+  alertCard.className = 'alert-card neutral';
+  alertTitle.textContent = 'Session Started';
+  alertDesc.textContent = 'Sit upright and click Calibrate Posture.';
+  calibStatusTxt.textContent = 'Not calibrated. Sit upright and click Calibrate.';
+
+  scoreLabel.textContent = '0';
+  ringFill.style.strokeDashoffset = '314.16';
+  alertCount.textContent = '0';
+  optimalPct.textContent = '—';
+  slouchPct.textContent = '—';
+  sessionTimer.textContent = '00:00';
+
+  state.sessionTimerInterval = setInterval(updateSessionTimer, 1000);
+
+  lucide.createIcons();
+
+  detectionLoop();
+  showToast('Session started — calibrate for accurate tracking');
+}
+
+async function stopSession() {
+  state.isRunning = false;
+  if (state.animFrameId) cancelAnimationFrame(state.animFrameId);
+  clearInterval(state.sessionTimerInterval);
+
+  stopWebcam();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  videoWrap.classList.remove('poor-posture');
+  calibIndicator.classList.remove('visible');
+
+  // Save to IndexedDB
+  const elapsed = Math.floor((Date.now() - (state.sessionStart || Date.now())) / 1000);
+  const score = state.totalFrames > 0
+    ? Math.round((state.goodFrames / state.totalFrames) * 100)
+    : 0;
+
+  const record = {
+    date: new Date().toISOString(),
+    focusTimeSeconds: elapsed,
+    avgPostureScore: score,
+    alertCount: state.alertCount
+  };
+
+  try {
+    await DB.addSession(record);
+    showToast('Session saved to history');
+  } catch (e) {
+    showToast('Could not save session: ' + e.message);
+  }
+
+  // UI reset
+  cameraEmpty.style.display = 'flex';
+  videoControls.style.display = 'none';
+  fpsChi.classList.remove('visible');
+  btnStart.disabled = false;
+  btnStop.disabled = true;
+  btnCalibrate.disabled = true;
+  btnCalibrate2.disabled = true;
+  btnStart.innerHTML = '<i data-lucide="play" style="width:14px;height:14px"></i> Start Session';
+
+  statusBadge.className = 'status-badge idle';
+  statusText.textContent = 'Inactive';
+  alertCard.className = 'alert-card neutral';
+  alertTitle.textContent = 'Session Ended';
+  alertDesc.textContent = 'Session saved. Start a new session to continue tracking.';
+
+  lucide.createIcons();
+  await loadHistory();
+}
+
+// =====================================================================
+// CALIBRATION
+// =====================================================================
+async function doCalibrate() {
+  if (!state.isRunning || !state.detector) return;
+
+  // Capture a single pose estimate for calibration
+  try {
+    const poses = await state.detector.estimatePoses(videoEl, {
+      maxPoses: 1,
+      flipHorizontal: false
+    });
+
+    if (!poses || poses.length === 0) {
+      showToast('No pose detected — ensure you are visible in frame');
+      return;
+    }
+
+    const success = calibrate(poses[0].keypoints);
+    if (success) {
+      calibIndicator.classList.add('visible');
+      calibStatusTxt.textContent = 'Calibrated ✓ — baseline set to your current posture.';
+      btnCalibrate.classList.add('calibrate-active');
+      btnCalibrate2.textContent = '✓ Re-calibrate';
+      showToast('Calibration successful — posture tracking active');
+
+      setTimeout(() => calibIndicator.classList.remove('visible'), 3000);
+    }
+  } catch (e) {
+    showToast('Calibration failed: ' + e.message);
+  }
+}
+
+// =====================================================================
+// HISTORY
+// =====================================================================
+async function loadHistory() {
+  try {
+    const sessions = await DB.getAllSessions();
+    historyCount.textContent = sessions.length + ' session' + (sessions.length !== 1 ? 's' : '');
+
+    if (sessions.length === 0) {
+      historyContainer.innerHTML = `
+        <div class="empty-history">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--border)">
+            <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 9h6"/><path d="M9 12h6"/><path d="M9 15h4"/>
+          </svg>
+          <p>No sessions recorded yet.<br/>Complete a session to see your history here.</p>
+        </div>`;
+      return;
+    }
+
+    const sorted = [...sessions].reverse();
+    let html = `<table class="history-table"><thead><tr>
+      <th>Date</th><th>Duration</th><th>Score</th><th>Alerts</th>
+    </tr></thead><tbody>`;
+
+    for (const s of sorted) {
+      const date = new Date(s.date);
+      const dateStr = date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
+      const timeStr = date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      const mins = Math.floor(s.focusTimeSeconds / 60);
+      const secs = s.focusTimeSeconds % 60;
+      const dur = mins + 'm ' + String(secs).padStart(2, '0') + 's';
+
+      const scoreClass = s.avgPostureScore >= 70 ? 'high' : s.avgPostureScore >= 40 ? 'mid' : 'low';
+
+      html += `<tr>
+        <td>${dateStr}, ${timeStr}</td>
+        <td>${dur}</td>
+        <td><span class="score-pill ${scoreClass}">${s.avgPostureScore}%</span></td>
+        <td>${s.alertCount}</td>
+      </tr>`;
+    }
+
+    html += '</tbody></table>';
+    historyContainer.innerHTML = html;
+  } catch (e) {
+    historyContainer.innerHTML = '<div class="empty-history"><p>Error loading history.</p></div>';
+  }
+}
+
+// =====================================================================
+// TOAST
+// =====================================================================
+function showToast(message) {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  const wrap = document.getElementById('toast-wrap');
+  wrap.appendChild(toast);
+  setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 3000);
+}
+
+// =====================================================================
+// EVENT LISTENERS
+// =====================================================================
+btnStart.addEventListener('click', startSession);
+btnStop.addEventListener('click', stopSession);
+
+btnCalibrate.addEventListener('click', doCalibrate);
+btnCalibrate2.addEventListener('click', doCalibrate);
+
+btnToggleSkel.addEventListener('click', () => {
+  state.showSkeleton = !state.showSkeleton;
+  btnToggleSkel.innerHTML = state.showSkeleton
+    ? '<i data-lucide="eye" style="width:13px;height:13px"></i> Skeleton'
+    : '<i data-lucide="eye-off" style="width:13px;height:13px"></i> Hidden';
+  lucide.createIcons();
+  if (!state.showSkeleton) ctx.clearRect(0, 0, canvas.width, canvas.height);
+});
+
+btnClearHist.addEventListener('click', async () => {
+  await DB.clearSessions();
+  await loadHistory();
+  showToast('History cleared');
+});
+
+// =====================================================================
+// BOOTSTRAP
+// =====================================================================
+(async () => {
+  lucide.createIcons();
+  await loadHistory();
+  await initModel();
+})();
+</script>
+</body>
+</html>

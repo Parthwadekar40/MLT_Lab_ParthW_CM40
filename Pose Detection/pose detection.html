@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Universal Pose Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet@2.2.2/dist/posenet.min.js"></script>
+<style>
+:root {
+  --primary:#2563EB; --primary-light:#DBEAFE; --primary-dark:#1D4ED8;
+  --bg:#F1F5F9; --surface:#FFFFFF; --surface2:#F8FAFC;
+  --border:#E2E8F0; --text:#0F172A; --text-2:#475569; --text-3:#94A3B8;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:40px 40px;opacity:0.4;pointer-events:none;z-index:0;}
+.app-wrap{position:relative;z-index:1;}
+.header{background:rgba(255,255,255,0.88);backdrop-filter:blur(14px);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,0.04),0 4px 16px rgba(0,0,0,0.04);}
+#canvas-wrap{position:relative;background:#0F172A;border-radius:12px;overflow:hidden;aspect-ratio:4/3;width:100%;}
+#output-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
+#video-el{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:0;}
+#image-el{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600;letter-spacing:0.04em;font-family:'DM Mono',monospace;}
+.badge-blue{background:#DBEAFE;color:#2563EB;} .badge-green{background:#D1FAE5;color:#059669;}
+.badge-amber{background:#FEF3C7;color:#D97706;} .badge-red{background:#FEE2E2;color:#DC2626;}
+.badge-purple{background:#EDE9FE;color:#6D28D9;} .badge-teal{background:#CFFAFE;color:#0E7490;}
+.badge-rose{background:#FFE4E6;color:#BE123C;} .badge-gray{background:#F1F5F9;color:#475569;}
+.stat-card{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:11px 13px;}
+.stat-value{font-size:20px;font-weight:700;line-height:1;color:var(--primary);font-family:'DM Mono',monospace;}
+.stat-label{font-size:10px;font-weight:500;color:var(--text-3);text-transform:uppercase;letter-spacing:0.08em;margin-top:4px;}
+.kp-row{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:7px;transition:background 0.15s;}
+.kp-row:hover{background:var(--surface2);}
+.kp-name{font-size:11px;font-weight:500;color:var(--text-2);width:80px;flex-shrink:0;}
+.kp-coords{font-size:11px;font-family:'DM Mono',monospace;color:var(--primary);flex:1;}
+.kp-conf{font-size:10px;font-family:'DM Mono',monospace;color:var(--text-3);width:30px;text-align:right;}
+.kp-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all 0.15s;user-select:none;}
+.btn-primary{background:var(--primary);color:#fff;} .btn-primary:hover{background:var(--primary-dark);transform:translateY(-1px);box-shadow:0 4px 12px rgba(37,99,235,0.3);}
+.btn-ghost{background:transparent;color:var(--text-2);border:1px solid var(--border);} .btn-ghost:hover{background:var(--surface2);}
+.btn-danger{background:#FEE2E2;color:#DC2626;border:1px solid #FECACA;} .btn-danger:hover{background:#FCA5A5;}
+.btn-success{background:#D1FAE5;color:#059669;border:1px solid #A7F3D0;} .btn-success:hover{background:#6EE7B7;}
+.btn:disabled{opacity:0.5;cursor:not-allowed;transform:none!important;}
+.toggle-pill{display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:3px;gap:2px;}
+.toggle-option{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s;color:var(--text-2);border:none;background:none;}
+.toggle-option.active{background:var(--primary);color:#fff;box-shadow:0 2px 8px rgba(37,99,235,0.3);}
+#drop-zone{border:2px dashed var(--border);border-radius:12px;padding:28px;text-align:center;cursor:pointer;transition:all 0.2s;background:var(--surface2);display:none;}
+#drop-zone.active,#drop-zone:hover{border-color:var(--primary);background:var(--primary-light);}
+#file-input{display:none;}
+.overlay-bar{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.75));padding:20px 14px 10px;display:flex;align-items:center;gap:8px;pointer-events:none;}
+.overlay-pose-tag{position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.65);backdrop-filter:blur(6px);border-radius:8px;padding:5px 12px;pointer-events:none;border-left:3px solid #2563EB;}
+ 
+/* Big pose banner */
+.pose-banner{border-radius:14px;padding:16px 20px;display:flex;align-items:center;gap:14px;position:relative;overflow:hidden;transition:background 0.4s;}
+.pose-banner::before{content:'';position:absolute;top:-20px;right:-20px;width:100px;height:100px;border-radius:50%;background:rgba(255,255,255,0.08);}
+.pose-icon-box{width:50px;height:50px;border-radius:12px;background:rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.pose-name-big{font-size:19px;font-weight:800;color:#fff;letter-spacing:-0.02em;line-height:1;}
+.pose-sub-text{font-size:11px;color:rgba(255,255,255,0.72);margin-top:3px;}
+.pose-pct{margin-left:auto;background:rgba(255,255,255,0.2);border-radius:99px;padding:4px 12px;font-size:13px;font-weight:700;color:#fff;font-family:'DM Mono',monospace;flex-shrink:0;}
+ 
+/* Angle rows */
+.angle-row{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:7px;transition:background 0.15s;}
+.angle-row:hover{background:var(--surface2);}
+.angle-label{font-size:11px;font-weight:500;color:var(--text-2);width:98px;flex-shrink:0;}
+.angle-track{flex:1;height:6px;background:var(--border);border-radius:99px;overflow:hidden;}
+.angle-fill{height:100%;border-radius:99px;transition:width 0.4s ease;}
+.angle-val{font-size:11px;font-family:'DM Mono',monospace;color:var(--primary);width:36px;text-align:right;}
+ 
+/* Timeline */
+.timeline-wrap{display:flex;align-items:flex-end;gap:3px;height:48px;padding:0 2px;}
+.timeline-bar{flex:1;border-radius:3px 3px 0 0;min-height:4px;transition:height 0.3s,background 0.3s;cursor:pointer;position:relative;}
+.timeline-bar:hover::after{content:attr(data-tip);position:absolute;bottom:110%;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;font-size:10px;padding:3px 7px;border-radius:5px;white-space:nowrap;z-index:10;font-family:'DM Mono',monospace;}
+ 
+/* Conf bar */
+.conf-bar-wrap{flex:1;height:4px;background:var(--border);border-radius:99px;overflow:hidden;}
+.conf-bar{height:100%;border-radius:99px;transition:width 0.3s;}
+ 
+/* Toast */
+#alert-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(100px);background:#1e293b;color:#fff;border-radius:12px;padding:11px 20px;font-size:13px;font-weight:600;z-index:1000;transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1);display:flex;align-items:center;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:400px;}
+#alert-toast.show{transform:translateX(-50%) translateY(0);}
+ 
+/* Admin */
+#admin-drawer{position:fixed;top:0;right:-440px;width:440px;height:100vh;background:var(--surface);border-left:1px solid var(--border);box-shadow:-8px 0 40px rgba(0,0,0,0.12);z-index:200;transition:right 0.3s cubic-bezier(0.4,0,0.2,1);display:flex;flex-direction:column;overflow:hidden;}
+#admin-drawer.open{right:0;}
+#drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:199;opacity:0;pointer-events:none;transition:opacity 0.3s;}
+#drawer-overlay.show{opacity:1;pointer-events:all;}
+#pin-modal{position:fixed;inset:0;background:rgba(15,23,42,0.6);backdrop-filter:blur(4px);z-index:300;align-items:center;justify-content:center;display:none;}
+#pin-modal.show{display:flex;}
+.pin-box{width:40px;height:52px;border:2px solid var(--border);border-radius:10px;font-size:22px;text-align:center;font-family:'DM Mono',monospace;font-weight:700;color:var(--primary);transition:border-color 0.15s;}
+.pin-box:focus{outline:none;border-color:var(--primary);}
+.log-row{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.1s;}
+.log-row:hover{background:var(--surface2);}
+ 
+@keyframes pulse-ring{0%{transform:scale(0.85);opacity:1;}100%{transform:scale(1.4);opacity:0;}}
+.live-indicator::before{content:'';position:absolute;inset:-4px;border-radius:50%;background:#EF4444;animation:pulse-ring 1.4s infinite;}
+.live-indicator{position:relative;width:10px;height:10px;border-radius:50%;background:#EF4444;flex-shrink:0;}
+@keyframes slideIn{from{opacity:0;transform:translateY(-5px);}to{opacity:1;transform:translateY(0);}}
+.pose-change-anim{animation:slideIn 0.3s ease;}
+ 
+/* Tabs */
+.tab-btn{padding:7px 14px;font-size:12px;font-weight:600;border:none;background:none;cursor:pointer;color:var(--text-3);border-bottom:2px solid transparent;transition:all 0.15s;}
+.tab-btn.active{color:var(--primary);border-bottom-color:var(--primary);}
+.tab-panel{display:none;}
+.tab-panel.active{display:block;}
+ 
+::-webkit-scrollbar{width:5px;} ::-webkit-scrollbar-track{background:transparent;} ::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px;}
+</style>
+</head>
+<body>
+<div class="app-wrap">
+ 
+<!-- HEADER -->
+<header class="header">
+  <div class="max-w-screen-xl mx-auto px-5 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div style="width:36px;height:36px;background:var(--primary);border-radius:10px;display:flex;align-items:center;justify-content:center;">
+        <i data-lucide="scan-face" style="width:18px;height:18px;color:#fff;"></i>
+      </div>
+      <div>
+        <div style="font-size:15px;font-weight:700;letter-spacing:-0.02em;">
+          AI Pose Tracker
+          <span style="font-size:10px;background:#DBEAFE;color:#2563EB;padding:2px 7px;border-radius:99px;font-weight:700;margin-left:5px;vertical-align:middle;">PRO</span>
+        </div>
+        <div style="font-size:10px;color:var(--text-3);font-weight:500;letter-spacing:0.05em;text-transform:uppercase;">TensorFlow.js · PoseNet · Smart Pose Classification</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="model-status-badge" class="badge badge-amber"><i data-lucide="loader" style="width:10px;height:10px;"></i> Loading</span>
+      <button class="btn btn-ghost" id="admin-btn" style="font-size:12px;padding:7px 14px;">
+        <i data-lucide="shield" style="width:14px;height:14px;"></i> Admin
+      </button>
+    </div>
+  </div>
+</header>
+ 
+<!-- MAIN -->
+<main class="max-w-screen-xl mx-auto px-5 py-5">
+  <div class="grid gap-5" style="grid-template-columns:1fr 400px;">
+ 
+    <!-- LEFT COLUMN -->
+    <div class="flex flex-col gap-4">
+ 
+      <!-- Mode toggle + live badges -->
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <div class="toggle-pill">
+          <button class="toggle-option active" id="btn-live" onclick="switchMode('live')">
+            <i data-lucide="video" style="width:13px;height:13px;"></i> Live Stream
+          </button>
+          <button class="toggle-option" id="btn-image" onclick="switchMode('image')">
+            <i data-lucide="image" style="width:13px;height:13px;"></i> Static Image
+          </button>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <span id="fps-badge" class="badge badge-blue">— FPS</span>
+          <span id="conf-badge" class="badge badge-green">— %</span>
+          <span id="pose-badge" class="badge badge-gray">No Pose</span>
+        </div>
+      </div>
+ 
+      <!-- Canvas viewer -->
+      <div class="card" style="padding:12px;">
+        <div id="canvas-wrap">
+          <video id="video-el" autoplay muted playsinline></video>
+          <img id="image-el" alt="Uploaded" />
+          <canvas id="output-canvas"></canvas>
+          <div class="overlay-pose-tag" id="canvas-pose-tag" style="display:none;">
+            <span id="canvas-pose-text" style="color:#fff;font-size:12px;font-weight:800;"></span>
+          </div>
+          <div class="overlay-bar">
+            <div id="live-dot" class="live-indicator"></div>
+            <span id="overlay-label" style="color:#fff;font-size:12px;font-weight:600;letter-spacing:0.04em;">LIVE STREAM</span>
+            <div style="flex:1;"></div>
+            <span id="overlay-fps" style="color:rgba(255,255,255,0.7);font-size:11px;font-family:'DM Mono',monospace;">0 FPS</span>
+          </div>
+        </div>
+ 
+        <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+          <i data-lucide="upload-cloud" style="width:28px;height:28px;color:var(--primary);margin:0 auto 8px;display:block;"></i>
+          <div style="font-size:14px;font-weight:600;">Drop an image here</div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:3px;">JPG / PNG — click to browse</div>
+        </div>
+        <input type="file" id="file-input" accept="image/jpeg,image/png" />
+ 
+        <div class="flex items-center gap-3 mt-3" id="live-controls">
+          <button class="btn btn-primary" id="start-btn" onclick="startCamera()">
+            <i data-lucide="play" style="width:14px;height:14px;"></i> Start Camera
+          </button>
+          <button class="btn btn-ghost" id="stop-btn" onclick="stopCamera()" disabled>
+            <i data-lucide="square" style="width:14px;height:14px;"></i> Stop
+          </button>
+          <button class="btn btn-ghost" onclick="saveLog()">
+            <i data-lucide="save" style="width:14px;height:14px;"></i> Save Log
+          </button>
+        </div>
+      </div>
+ 
+      <!-- BIG POSE DISPLAY -->
+      <div class="pose-banner" id="pose-banner" style="background:linear-gradient(135deg,#2563EB 0%,#7C3AED 100%);">
+        <div class="pose-icon-box">
+          <i data-lucide="scan" style="width:22px;height:22px;color:#fff;" id="pose-main-icon"></i>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div class="pose-name-big" id="pose-name-big">Awaiting Detection</div>
+          <div class="pose-sub-text" id="pose-sub-text">Start camera or upload an image</div>
+        </div>
+        <div class="pose-pct" id="pose-pct">—</div>
+      </div>
+ 
+      <!-- Session Statistics -->
+      <div class="card" style="padding:14px 16px;">
+        <div style="font-size:13px;font-weight:700;margin-bottom:11px;display:flex;align-items:center;gap:6px;">
+          <i data-lucide="bar-chart-2" style="width:14px;height:14px;color:var(--primary);"></i>
+          Session Statistics
+        </div>
+        <div class="grid gap-2" style="grid-template-columns:repeat(6,1fr);">
+          <div class="stat-card"><div class="stat-value" id="stat-fps">0</div><div class="stat-label">FPS</div></div>
+          <div class="stat-card"><div class="stat-value" id="stat-conf">0%</div><div class="stat-label">Conf.</div></div>
+          <div class="stat-card"><div class="stat-value" id="stat-kp">0</div><div class="stat-label">Kpts</div></div>
+          <div class="stat-card"><div class="stat-value" id="stat-frames">0</div><div class="stat-label">Frames</div></div>
+          <div class="stat-card"><div class="stat-value" id="stat-changes">0</div><div class="stat-label">Changes</div></div>
+          <div class="stat-card"><div class="stat-value" id="stat-logs">0</div><div class="stat-label">Logs</div></div>
+        </div>
+      </div>
+ 
+      <!-- Pose Timeline -->
+      <div class="card" style="padding:14px 16px;">
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+          <i data-lucide="activity" style="width:14px;height:14px;color:var(--primary);"></i>
+          Pose History Timeline
+          <span style="font-size:10px;color:var(--text-3);margin-left:auto;">last 60 frames · hover for label</span>
+        </div>
+        <div class="timeline-wrap" id="pose-timeline"></div>
+        <div style="display:flex;gap:10px;margin-top:9px;flex-wrap:wrap;" id="pose-legend"></div>
+      </div>
+ 
+    </div>
+ 
+    <!-- RIGHT COLUMN -->
+    <div class="flex flex-col gap-4">
+ 
+      <!-- Tabbed panel -->
+      <div class="card" style="overflow:hidden;padding:0;">
+        <div style="display:flex;border-bottom:1px solid var(--border);padding:0 14px;">
+          <button class="tab-btn active" onclick="switchTab('coords')" id="tab-coords">Keypoints</button>
+          <button class="tab-btn" onclick="switchTab('angles')" id="tab-angles">Angles</button>
+          <button class="tab-btn" onclick="switchTab('analysis')" id="tab-analysis">Analysis</button>
+        </div>
+ 
+        <!-- Keypoints -->
+        <div class="tab-panel active" id="panel-coords" style="padding:13px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;">
+            <span style="font-size:11px;color:var(--text-3);font-weight:500;">Real-time X / Y positions</span>
+            <span class="badge badge-green" style="font-size:10px;">Live</span>
+          </div>
+          <div id="kp-list" style="display:flex;flex-direction:column;gap:1px;"></div>
+        </div>
+ 
+        <!-- Joint Angles -->
+        <div class="tab-panel" id="panel-angles" style="padding:13px;">
+          <div style="font-size:11px;color:var(--text-3);font-weight:500;margin-bottom:9px;">Joint angles in degrees — computed geometrically</div>
+          <div id="angle-list" style="display:flex;flex-direction:column;gap:4px;"></div>
+        </div>
+ 
+        <!-- Analysis -->
+        <div class="tab-panel" id="panel-analysis" style="padding:13px;">
+          <div id="analysis-content"></div>
+        </div>
+      </div>
+ 
+      <!-- Confidence Breakdown -->
+      <div class="card" style="padding:14px 16px;">
+        <div style="font-size:13px;font-weight:700;margin-bottom:11px;display:flex;align-items:center;gap:6px;">
+          <i data-lucide="signal" style="width:14px;height:14px;color:var(--primary);"></i>
+          Detection Confidence
+        </div>
+        <div id="conf-list" style="display:flex;flex-direction:column;gap:7px;"></div>
+      </div>
+ 
+      <!-- Posture Feedback -->
+      <div class="card" style="padding:14px 16px;" id="posture-card">
+        <div style="display:flex;align-items:flex-start;gap:10px;">
+          <div id="posture-icon-box" style="width:36px;height:36px;border-radius:10px;background:#DBEAFE;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;">
+            <i data-lucide="person-standing" style="width:17px;height:17px;color:#2563EB;" id="posture-icon"></i>
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:700;" id="posture-title">Waiting for Detection</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px;line-height:1.5;" id="posture-desc">Start camera or upload an image to begin analysis.</div>
+          </div>
+        </div>
+      </div>
+ 
+    </div>
+  </div>
+</main>
+</div>
+ 
+<!-- TOAST -->
+<div id="alert-toast">
+  <i data-lucide="zap" style="width:15px;height:15px;color:#FBBF24;flex-shrink:0;"></i>
+  <span id="toast-text">Pose changed</span>
+</div>
+ 
+<!-- PIN MODAL -->
+<div id="pin-modal">
+  <div class="card" style="padding:32px 28px;width:340px;text-align:center;">
+    <div style="width:52px;height:52px;background:#DBEAFE;border-radius:14px;margin:0 auto 18px;display:flex;align-items:center;justify-content:center;">
+      <i data-lucide="lock" style="width:22px;height:22px;color:#2563EB;"></i>
+    </div>
+    <div style="font-size:17px;font-weight:700;margin-bottom:6px;">Admin Access</div>
+    <div style="font-size:12px;color:var(--text-3);margin-bottom:22px;">Enter 4-digit PIN · default: 1234</div>
+    <div style="display:flex;gap:10px;justify-content:center;margin-bottom:22px;">
+      <input class="pin-box" id="p1" maxlength="1" type="password" inputmode="numeric" />
+      <input class="pin-box" id="p2" maxlength="1" type="password" inputmode="numeric" />
+      <input class="pin-box" id="p3" maxlength="1" type="password" inputmode="numeric" />
+      <input class="pin-box" id="p4" maxlength="1" type="password" inputmode="numeric" />
+    </div>
+    <div id="pin-error" style="font-size:12px;color:#DC2626;min-height:16px;margin-bottom:14px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-ghost" style="flex:1;" onclick="closePinModal()">Cancel</button>
+      <button class="btn btn-primary" style="flex:1;" onclick="checkPin()">
+        <i data-lucide="unlock" style="width:13px;height:13px;"></i> Unlock
+      </button>
+    </div>
+  </div>
+</div>
+ 
+<!-- OVERLAY -->
+<div id="drawer-overlay" onclick="closeDrawer()"></div>
+ 
+<!-- ADMIN DRAWER -->
+<div id="admin-drawer">
+  <div style="padding:17px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+    <div style="width:32px;height:32px;background:#DBEAFE;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+      <i data-lucide="shield-check" style="width:15px;height:15px;color:#2563EB;"></i>
+    </div>
+    <div style="flex:1;"><div style="font-size:14px;font-weight:700;">Admin Panel</div><div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.06em;">Detection Logs</div></div>
+    <button class="btn btn-ghost" style="padding:6px 10px;" onclick="closeDrawer()"><i data-lucide="x" style="width:14px;height:14px;"></i></button>
+  </div>
+  <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px;">
+    <button class="btn btn-success" style="flex:1;font-size:12px;" onclick="exportCSV()"><i data-lucide="download" style="width:12px;height:12px;"></i> Export CSV</button>
+    <button class="btn btn-danger" style="flex:1;font-size:12px;" onclick="clearHistory()"><i data-lucide="trash-2" style="width:12px;height:12px;"></i> Clear All</button>
+  </div>
+  <div id="log-count-bar" style="padding:8px 14px;font-size:11px;color:var(--text-3);background:var(--surface2);border-bottom:1px solid var(--border);">0 entries</div>
+  <div id="log-list" style="flex:1;overflow-y:auto;"></div>
+</div>
+ 
+<script>
+// ════════════════════════════════════════════════════
+// GLOBALS
+// ════════════════════════════════════════════════════
+let net=null, stream=null, animFrame=null;
+let mode='live', isRunning=false;
+let fps=0, frameCount=0, lastFpsTime=performance.now();
+let detectionLogs=[], dbReady=false, db;
+let currentPose='Unknown', prevPose='Unknown', poseChangeCount=0, totalFrames=0;
+let poseHistory=[];
+let toastTimer=null;
+ 
+const videoEl  = document.getElementById('video-el');
+const imageEl  = document.getElementById('image-el');
+const canvas   = document.getElementById('output-canvas');
+const ctx      = canvas.getContext('2d');
+const dropZone = document.getElementById('drop-zone');
+const fileInput= document.getElementById('file-input');
+ 
+const ADJACENT=[
+  ['leftShoulder','rightShoulder'],['leftShoulder','leftElbow'],['leftElbow','leftWrist'],
+  ['rightShoulder','rightElbow'],['rightElbow','rightWrist'],
+  ['leftShoulder','leftHip'],['rightShoulder','rightHip'],['leftHip','rightHip'],
+  ['leftHip','leftKnee'],['leftKnee','leftAnkle'],
+  ['rightHip','rightKnee'],['rightKnee','rightAnkle'],
+  ['nose','leftEye'],['nose','rightEye'],['leftEye','leftEar'],['rightEye','rightEar'],
+];
+ 
+const DISPLAY_KPS=['nose','leftShoulder','rightShoulder','leftElbow','rightElbow','leftWrist','rightWrist','leftKnee','rightKnee','leftAnkle','rightAnkle'];
+const DISPLAY_LABELS={nose:'Nose',leftShoulder:'L. Shoulder',rightShoulder:'R. Shoulder',leftElbow:'L. Elbow',rightElbow:'R. Elbow',leftWrist:'L. Wrist',rightWrist:'R. Wrist',leftKnee:'L. Knee',rightKnee:'R. Knee',leftAnkle:'L. Ankle',rightAnkle:'R. Ankle'};
+const CONF_COLORS={nose:'#2563EB',leftShoulder:'#7C3AED',rightShoulder:'#DB2777',leftElbow:'#EA580C',rightElbow:'#16A34A',leftWrist:'#0891B2',rightWrist:'#CA8A04',leftKnee:'#DC2626',rightKnee:'#9333EA',leftAnkle:'#059669',rightAnkle:'#D97706'};
+ 
+// Pose metadata
+const POSE_META={
+  'Standing':        {color:'#2563EB',icon:'person-standing',sub:'Full body upright, knees extended',badge:'blue'},
+  'Sitting':         {color:'#7C3AED',icon:'armchair',       sub:'Hips at knee level, knees bent',badge:'purple'},
+  'Crouching':       {color:'#CA8A04',icon:'move-down',      sub:'Deep squat, knees sharply bent',badge:'amber'},
+  'Bending Forward': {color:'#DC2626',icon:'arrow-down',     sub:'Torso pitched forward',badge:'red'},
+  'Arms Raised':     {color:'#059669',icon:'hand',           sub:'Both wrists above shoulders',badge:'green'},
+  'Left Arm Up':     {color:'#0891B2',icon:'hand',           sub:'Left wrist above shoulder',badge:'teal'},
+  'Right Arm Up':    {color:'#0E7490',icon:'hand',           sub:'Right wrist above shoulder',badge:'teal'},
+  'T-Pose':          {color:'#9333EA',icon:'accessibility',  sub:'Arms spread horizontally wide',badge:'purple'},
+  'Hands on Hips':   {color:'#E11D48',icon:'person-standing',sub:'Elbows flared, wrists at hip',badge:'rose'},
+  'Walking':         {color:'#16A34A',icon:'footprints',     sub:'Asymmetric leg motion detected',badge:'green'},
+  'Leaning Left':    {color:'#D97706',icon:'move-left',      sub:'Body tilted to left',badge:'amber'},
+  'Leaning Right':   {color:'#B45309',icon:'move-right',     sub:'Body tilted to right',badge:'amber'},
+  'Unknown':         {color:'#94A3B8',icon:'scan',           sub:'Insufficient keypoints visible',badge:'gray'},
+};
+ 
+// ════════════════════════════════════════════════════
+// INDEXEDDB
+// ════════════════════════════════════════════════════
+function initDB(){
+  const req=indexedDB.open('PoseTrackerDB_v3',1);
+  req.onupgradeneeded=e=>{const d=e.target.result;if(!d.objectStoreNames.contains('logs'))d.createObjectStore('logs',{keyPath:'id',autoIncrement:true});};
+  req.onsuccess=e=>{db=e.target.result;dbReady=true;loadLogsFromDB();};
+  req.onerror=()=>console.error('IndexedDB error');
+}
+function saveLogToDB(entry){if(!dbReady)return;const tx=db.transaction('logs','readwrite');tx.objectStore('logs').add(entry);tx.oncomplete=loadLogsFromDB;}
+function loadLogsFromDB(){if(!dbReady)return;const tx=db.transaction('logs','readonly');const req=tx.objectStore('logs').getAll();req.onsuccess=e=>{detectionLogs=e.target.result.reverse();renderLogs();updateStatLogCount();};}
+function clearLogsFromDB(){if(!dbReady)return;const tx=db.transaction('logs','readwrite');tx.objectStore('logs').clear();tx.oncomplete=()=>{detectionLogs=[];renderLogs();updateStatLogCount();};}
+ 
+// ════════════════════════════════════════════════════
+// MODEL
+// ════════════════════════════════════════════════════
+async function loadModel(){
+  try{
+    setBadge('model-status-badge','amber','loader','Loading Model');
+    net=await posenet.load({architecture:'MobileNetV1',outputStride:16,inputResolution:{width:640,height:480},multiplier:0.75});
+    setBadge('model-status-badge','green','check-circle','Model Ready');
+    document.getElementById('start-btn').disabled=false;
+  }catch(e){setBadge('model-status-badge','red','alert-circle','Model Failed');console.error(e);}
+}
+function setBadge(id,color,icon,text){
+  const el=document.getElementById(id);
+  el.className=`badge badge-${color}`;
+  el.innerHTML=`<i data-lucide="${icon}" style="width:10px;height:10px;"></i> ${text}`;
+  lucide.createIcons();
+}
+ 
+// ════════════════════════════════════════════════════
+// MATH
+// ════════════════════════════════════════════════════
+function angleBetween(A,B,C){
+  const BA={x:A.x-B.x,y:A.y-B.y},BC={x:C.x-B.x,y:C.y-B.y};
+  const dot=BA.x*BC.x+BA.y*BC.y;
+  const mag=Math.sqrt(BA.x**2+BA.y**2)*Math.sqrt(BC.x**2+BC.y**2);
+  if(mag===0)return 0;
+  return Math.round(Math.acos(Math.min(1,Math.max(-1,dot/mag)))*(180/Math.PI));
+}
+function pt(kpMap,name){const k=kpMap[name];return(k&&k.score>0.25)?k.position:null;}
+function vis(kpMap,...names){return names.every(n=>kpMap[n]&&kpMap[n].score>0.25);}
+ 
+// ════════════════════════════════════════════════════
+// POSE CLASSIFICATION
+// ════════════════════════════════════════════════════
+function classifyPose(kpMap){
+  const ls=pt(kpMap,'leftShoulder'),rs=pt(kpMap,'rightShoulder');
+  if(!ls||!rs) return {label:'Unknown',confidence:0};
+ 
+  const lh=pt(kpMap,'leftHip'),     rh=pt(kpMap,'rightHip');
+  const lk=pt(kpMap,'leftKnee'),    rk=pt(kpMap,'rightKnee');
+  const la=pt(kpMap,'leftAnkle'),   ra=pt(kpMap,'rightAnkle');
+  const lw=pt(kpMap,'leftWrist'),   rw=pt(kpMap,'rightWrist');
+  const le=pt(kpMap,'leftElbow'),   re=pt(kpMap,'rightElbow');
+ 
+  const shoulderY=(ls.y+rs.y)/2;
+  const hipY=lh&&rh?(lh.y+rh.y)/2:null;
+  const shoulderW=Math.abs(ls.x-rs.x);
+  const elbowW=le&&re?Math.abs(le.x-re.x):0;
+  const shoulderTilt=Math.abs(ls.y-rs.y);
+ 
+  // Knee angles
+  let kneL=null,kneR=null,hipAngL=null;
+  if(lh&&lk&&la) kneL=angleBetween(lh,lk,la);
+  if(rh&&rk&&ra) kneR=angleBetween(rh,rk,ra);
+  if(ls&&lh&&lk) hipAngL=angleBetween(ls,lh,lk);
+  const avgKnee=(kneL!==null&&kneR!==null)?(kneL+kneR)/2:(kneL??kneR);
+ 
+  // Wrists above shoulders?
+  const lwUp=lw&&lw.y<shoulderY-20;
+  const rwUp=rw&&rw.y<shoulderY-20;
+ 
+  // T-Pose: elbows wide near shoulder height
+  if(le&&re&&elbowW>shoulderW*1.85&&Math.abs(le.y-shoulderY)<50&&Math.abs(re.y-shoulderY)<50)
+    return {label:'T-Pose',confidence:90};
+ 
+  // Arms
+  if(lwUp&&rwUp) return {label:'Arms Raised',confidence:91};
+  if(lwUp)       return {label:'Left Arm Up', confidence:86};
+  if(rwUp)       return {label:'Right Arm Up',confidence:86};
+ 
+  // Hands on hips
+  if(le&&re&&lw&&rw&&hipY&&elbowW>shoulderW*1.35&&Math.abs(lw.y-hipY)<65&&Math.abs(rw.y-hipY)<65)
+    return {label:'Hands on Hips',confidence:83};
+ 
+  // Squat / Sit
+  if(avgKnee!==null&&avgKnee<80) return {label:'Crouching',confidence:87};
+  if(avgKnee!==null&&avgKnee<130) return {label:'Sitting',confidence:85};
+ 
+  // Bending
+  if(hipAngL!==null&&hipAngL<115) return {label:'Bending Forward',confidence:81};
+ 
+  // Walking: significant asymmetric knee heights
+  if(lk&&rk&&Math.abs(lk.y-rk.y)>45&&(avgKnee===null||avgKnee>130))
+    return {label:'Walking',confidence:76};
+ 
+  // Lean
+  if(shoulderTilt>38){
+    return ls.y>rs.y?{label:'Leaning Left',confidence:79}:{label:'Leaning Right',confidence:79};
+  }
+ 
+  // Standing default
+  if(hipY&&Math.abs(shoulderY-hipY)>35) return {label:'Standing',confidence:88};
+ 
+  return {label:'Standing',confidence:70};
+}
+ 
+// ════════════════════════════════════════════════════
+// JOINT ANGLES FOR DISPLAY
+// ════════════════════════════════════════════════════
+function computeAngles(kpMap){
+  const defs=[
+    {label:'L. Elbow',pts:['leftShoulder','leftElbow','leftWrist']},
+    {label:'R. Elbow',pts:['rightShoulder','rightElbow','rightWrist']},
+    {label:'L. Shoulder',pts:['leftElbow','leftShoulder','leftHip']},
+    {label:'R. Shoulder',pts:['rightElbow','rightShoulder','rightHip']},
+    {label:'L. Hip',pts:['leftShoulder','leftHip','leftKnee']},
+    {label:'R. Hip',pts:['rightShoulder','rightHip','rightKnee']},
+    {label:'L. Knee',pts:['leftHip','leftKnee','leftAnkle']},
+    {label:'R. Knee',pts:['rightHip','rightKnee','rightAnkle']},
+  ];
+  return defs.map(({label,pts})=>{
+    const [a,b,c]=pts;
+    if(vis(kpMap,a,b,c)) return {label,angle:angleBetween(kpMap[a].position,kpMap[b].position,kpMap[c].position)};
+    return {label,angle:null};
+  });
+}
+ 
+// ════════════════════════════════════════════════════
+// MODE / TAB SWITCHING
+// ════════════════════════════════════════════════════
+function switchMode(m){
+  mode=m;
+  document.getElementById('btn-live').classList.toggle('active',m==='live');
+  document.getElementById('btn-image').classList.toggle('active',m==='image');
+  if(m==='live'){
+    dropZone.style.display='none';
+    document.getElementById('live-controls').style.display='flex';
+    document.getElementById('live-dot').style.display='block';
+    document.getElementById('overlay-label').textContent='LIVE STREAM';
+    stopCamera();clearCanvas();
+  } else {
+    stopCamera();
+    dropZone.style.display='block';
+    document.getElementById('live-controls').style.display='none';
+    document.getElementById('live-dot').style.display='none';
+    document.getElementById('overlay-label').textContent='STATIC IMAGE';
+    videoEl.style.opacity='0';
+    clearCanvas();resetStats();
+  }
+}
+function switchTab(t){
+  ['coords','angles','analysis'].forEach(id=>{
+    document.getElementById('tab-'+id).classList.toggle('active',id===t);
+    document.getElementById('panel-'+id).classList.toggle('active',id===t);
+  });
+}
+ 
+// ════════════════════════════════════════════════════
+// CAMERA
+// ════════════════════════════════════════════════════
+async function startCamera(){
+  if(!net){alert('Model not ready, please wait.');return;}
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false});
+    videoEl.srcObject=stream; videoEl.style.opacity='1';
+    await new Promise(r=>videoEl.onloadeddata=r);
+    isRunning=true;
+    document.getElementById('start-btn').disabled=true;
+    document.getElementById('stop-btn').disabled=false;
+    setBadge('model-status-badge','green','radio','Detecting');
+    detectLoop();
+  }catch(e){alert('Camera error: '+e.message);}
+}
+function stopCamera(){
+  isRunning=false;
+  if(animFrame)cancelAnimationFrame(animFrame);
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+  videoEl.srcObject=null;videoEl.style.opacity='0';
+  document.getElementById('start-btn').disabled=false;
+  document.getElementById('stop-btn').disabled=true;
+  if(net)setBadge('model-status-badge','green','check-circle','Model Ready');
+  clearCanvas();resetStats();
+}
+ 
+// ════════════════════════════════════════════════════
+// DETECT LOOP
+// ════════════════════════════════════════════════════
+async function detectLoop(){
+  if(!isRunning)return;
+  frameCount++;
+  const now=performance.now();
+  if(now-lastFpsTime>=1000){fps=Math.round(frameCount*1000/(now-lastFpsTime));frameCount=0;lastFpsTime=now;}
+  if(videoEl.readyState>=2){
+    try{
+      const wrap=document.getElementById('canvas-wrap');
+      canvas.width=wrap.offsetWidth;canvas.height=wrap.offsetHeight;
+      const pose=await net.estimateSinglePose(videoEl,{flipHorizontal:true});
+      drawPose(pose,'live');
+      updateUI(pose);
+    }catch(e){/* continue */}
+  }
+  animFrame=requestAnimationFrame(detectLoop);
+}
+ 
+// ════════════════════════════════════════════════════
+// IMAGE
+// ════════════════════════════════════════════════════
+dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.add('active');});
+dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('active'));
+dropZone.addEventListener('drop',e=>{
+  e.preventDefault();dropZone.classList.remove('active');
+  const f=e.dataTransfer.files[0];
+  if(f&&(f.type==='image/jpeg'||f.type==='image/png'))processImage(f);
+});
+fileInput.addEventListener('change',e=>{if(e.target.files[0])processImage(e.target.files[0]);fileInput.value='';});
+ 
+function processImage(file){
+  const url=URL.createObjectURL(file);
+  imageEl.onload=async()=>{
+    dropZone.style.display='none';imageEl.style.opacity='1';
+    const wrap=document.getElementById('canvas-wrap');
+    canvas.width=wrap.offsetWidth;canvas.height=wrap.offsetHeight;
+    setBadge('model-status-badge','amber','loader','Analyzing...');
+    try{
+      const pose=await net.estimateSinglePose(imageEl,{flipHorizontal:false});
+      drawPose(pose,'image');updateUI(pose);saveLog(pose);
+      setBadge('model-status-badge','green','check-circle','Done');
+    }catch(e){setBadge('model-status-badge','red','alert-circle','Failed');console.error(e);}
+    URL.revokeObjectURL(url);
+  };
+  imageEl.src=url;
+}
+ 
+// ════════════════════════════════════════════════════
+// DRAWING
+// ════════════════════════════════════════════════════
+function getParams(src){
+  if(src==='live'){
+    const vw=videoEl.videoWidth||640,vh=videoEl.videoHeight||480;
+    const s=Math.max(canvas.width/vw,canvas.height/vh);
+    return {sx:s,sy:s,ox:(canvas.width-vw*s)/2,oy:(canvas.height-vh*s)/2};
+  } else {
+    const nw=imageEl.naturalWidth||640,nh=imageEl.naturalHeight||480;
+    const s=Math.min(canvas.width/nw,canvas.height/nh);
+    return {sx:s,sy:s,ox:(canvas.width-nw*s)/2,oy:(canvas.height-nh*s)/2};
+  }
+}
+function toC(kp,p){return {x:kp.position.x*p.sx+p.ox,y:kp.position.y*p.sy+p.oy};}
+ 
+function drawPose(pose,src){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const kpMap={};pose.keypoints.forEach(k=>kpMap[k.part]=k);
+  const p=getParams(src);
+  const {label}=classifyPose(kpMap);
+  const meta=POSE_META[label]||POSE_META['Unknown'];
+ 
+  // Limbs
+  ctx.lineWidth=2.5;
+  ADJACENT.forEach(([a,b])=>{
+    const kpA=kpMap[a],kpB=kpMap[b];
+    if(!kpA||!kpB||kpA.score<0.3||kpB.score<0.3)return;
+    const pA=toC(kpA,p),pB=toC(kpB,p);
+    const g=ctx.createLinearGradient(pA.x,pA.y,pB.x,pB.y);
+    g.addColorStop(0,meta.color+'DD');g.addColorStop(1,'#7C3AED'+'AA');
+    ctx.strokeStyle=g;ctx.beginPath();ctx.moveTo(pA.x,pA.y);ctx.lineTo(pB.x,pB.y);ctx.stroke();
+  });
+ 
+  // Joints
+  pose.keypoints.forEach(kp=>{
+    if(kp.score<0.3)return;
+    const {x,y}=toC(kp,p);const r=kp.score>0.7?6:4;
+    ctx.beginPath();ctx.arc(x,y,r+3,0,2*Math.PI);ctx.fillStyle='rgba(255,255,255,0.18)';ctx.fill();
+    ctx.beginPath();ctx.arc(x,y,r,0,2*Math.PI);ctx.fillStyle=CONF_COLORS[kp.part]||'#2563EB';ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+  });
+ 
+  // Angle labels on key joints
+  const angleJoints=[
+    ['leftShoulder','leftElbow','leftWrist'],
+    ['rightShoulder','rightElbow','rightWrist'],
+    ['leftHip','leftKnee','leftAnkle'],
+    ['rightHip','rightKnee','rightAnkle'],
+  ];
+  ctx.font='bold 9px "DM Mono",monospace';
+  angleJoints.forEach(([a,b,c])=>{
+    if(!vis(kpMap,a,b,c))return;
+    const B=toC(kpMap[b],p);
+    const ang=angleBetween(kpMap[a].position,kpMap[b].position,kpMap[c].position);
+    ctx.lineWidth=2.5;ctx.strokeStyle='rgba(0,0,0,0.6)';ctx.strokeText(ang+'°',B.x+8,B.y-5);
+    ctx.fillStyle='rgba(255,255,255,0.95)';ctx.fillText(ang+'°',B.x+8,B.y-5);
+  });
+}
+ 
+function clearCanvas(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  imageEl.style.opacity='0';imageEl.src='';
+  document.getElementById('canvas-pose-tag').style.display='none';
+}
+ 
+// ════════════════════════════════════════════════════
+// UI UPDATE (master)
+// ════════════════════════════════════════════════════
+function updateUI(pose){
+  window._lastPose=pose;
+  const kpMap={};pose.keypoints.forEach(k=>kpMap[k.part]=k);
+ 
+  // FPS / conf
+  if(mode==='live'){
+    document.getElementById('fps-badge').textContent=fps+' FPS';
+    document.getElementById('overlay-fps').textContent=fps+' FPS';
+    document.getElementById('stat-fps').textContent=fps;
+  } else {
+    document.getElementById('fps-badge').textContent='— FPS';
+    document.getElementById('stat-fps').textContent='—';
+  }
+  const scored=pose.keypoints.filter(k=>k.score>0.1);
+  const avgConf=scored.length?scored.reduce((s,k)=>s+k.score,0)/scored.length:0;
+  const confPct=Math.round(avgConf*100);
+  document.getElementById('conf-badge').textContent=confPct+'%';
+  document.getElementById('stat-conf').textContent=confPct+'%';
+  document.getElementById('stat-kp').textContent=pose.keypoints.filter(k=>k.score>0.3).length;
+  totalFrames++;document.getElementById('stat-frames').textContent=totalFrames;
+ 
+  // Classify
+  const {label,confidence}=classifyPose(kpMap);
+  const meta=POSE_META[label]||POSE_META['Unknown'];
+ 
+  // Pose badge header
+  const pb=document.getElementById('pose-badge');
+  pb.className=`badge badge-${meta.badge}`;pb.textContent=label;
+ 
+  // Big banner
+  updateBanner(label,confidence,meta);
+ 
+  // Pose history
+  poseHistory.push({pose:label,color:meta.color,conf:confidence});
+  if(poseHistory.length>60)poseHistory.shift();
+  renderTimeline();
+ 
+  // Canvas tag
+  const tag=document.getElementById('canvas-pose-tag');
+  tag.style.display='block';tag.style.borderLeftColor=meta.color;
+  document.getElementById('canvas-pose-text').textContent=label;
+ 
+  // Keypoints list
+  const listEl=document.getElementById('kp-list');listEl.innerHTML='';
+  DISPLAY_KPS.forEach(name=>{
+    const kp=kpMap[name];const conf=kp?kp.score:0;
+    const row=document.createElement('div');row.className='kp-row';
+    const dc=conf>0.6?'#10B981':conf>0.3?'#F59E0B':'#CBD5E1';
+    row.innerHTML=`<div class="kp-dot" style="background:${dc};"></div><span class="kp-name">${DISPLAY_LABELS[name]}</span><span class="kp-coords">${kp&&kp.score>0.1?Math.round(kp.position.x)+', '+Math.round(kp.position.y):'—, —'}</span><span class="kp-conf">${Math.round(conf*100)}%</span>`;
+    listEl.appendChild(row);
+  });
+ 
+  // Angles
+  const angles=computeAngles(kpMap);
+  const angleEl=document.getElementById('angle-list');angleEl.innerHTML='';
+  angles.forEach(({label:al,angle})=>{
+    const pct=angle!==null?Math.round((angle/180)*100):0;
+    const ac=angle!==null?(angle<60?'#EF4444':angle<120?'#F59E0B':'#10B981'):'#CBD5E1';
+    const row=document.createElement('div');row.className='angle-row';
+    row.innerHTML=`<span class="angle-label">${al}</span><div class="angle-track"><div class="angle-fill" style="width:${pct}%;background:${ac};"></div></div><span class="angle-val">${angle!==null?angle+'°':'—'}</span>`;
+    angleEl.appendChild(row);
+  });
+ 
+  // Confidence bars
+  const confEl=document.getElementById('conf-list');confEl.innerHTML='';
+  DISPLAY_KPS.forEach(name=>{
+    const kp=kpMap[name];const conf=kp?kp.score:0;
+    const row=document.createElement('div');
+    row.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;"><span style="font-size:11px;color:var(--text-2);font-weight:500;">${DISPLAY_LABELS[name]}</span><span style="font-size:10px;font-family:'DM Mono',monospace;color:var(--text-3);">${Math.round(conf*100)}%</span></div><div class="conf-bar-wrap"><div class="conf-bar" style="width:${Math.round(conf*100)}%;background:${CONF_COLORS[name]||'#2563EB'};"></div></div>`;
+    confEl.appendChild(row);
+  });
+ 
+  // Posture
+  updatePosture(kpMap,label,angles);
+ 
+  // Analysis
+  updateAnalysis(kpMap,label,angles,confPct);
+}
+ 
+function updateBanner(label,confidence,meta){
+  const nameEl=document.getElementById('pose-name-big');
+  if(nameEl.textContent!==label){
+    if(prevPose!=='Unknown'&&label!==prevPose){
+      poseChangeCount++;
+      document.getElementById('stat-changes').textContent=poseChangeCount;
+      showToast('Pose → '+label,meta.color);
+    }
+    prevPose=currentPose;currentPose=label;
+    nameEl.classList.remove('pose-change-anim');
+    void nameEl.offsetWidth;
+    nameEl.classList.add('pose-change-anim');
+  }
+  nameEl.textContent=label;
+  document.getElementById('pose-sub-text').textContent=meta.sub;
+  document.getElementById('pose-pct').textContent=confidence+'%';
+  document.getElementById('pose-banner').style.background=`linear-gradient(135deg,${meta.color} 0%,#7C3AED 100%)`;
+  const icon=document.getElementById('pose-main-icon');
+  icon.setAttribute('data-lucide',meta.icon);
+  lucide.createIcons();
+}
+ 
+function renderTimeline(){
+  const wrap=document.getElementById('pose-timeline');wrap.innerHTML='';
+  const maxH=44;
+  poseHistory.forEach((e,i)=>{
+    const bar=document.createElement('div');bar.className='timeline-bar';
+    const h=Math.max(4,Math.round((e.conf/100)*maxH));
+    bar.style.height=h+'px';bar.style.background=e.color;
+    bar.style.opacity=0.3+(i/poseHistory.length)*0.7;
+    bar.setAttribute('data-tip',e.pose);
+    wrap.appendChild(bar);
+  });
+  // Legend
+  const seen={};poseHistory.forEach(e=>{if(!seen[e.pose])seen[e.pose]=e.color;});
+  const legEl=document.getElementById('pose-legend');legEl.innerHTML='';
+  Object.entries(seen).forEach(([pose,color])=>{
+    const d=document.createElement('div');
+    d.style.cssText='display:flex;align-items:center;gap:5px;';
+    d.innerHTML=`<div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div><span style="font-size:10px;color:var(--text-2);font-weight:500;">${pose}</span>`;
+    legEl.appendChild(d);
+  });
+}
+ 
+function updatePosture(kpMap,label,angles){
+  let title=label,desc=POSE_META[label]?.sub||'',color=POSE_META[label]?.color||'#2563EB',bg='#DBEAFE';
+ 
+  const ls=kpMap['leftShoulder'],rs=kpMap['rightShoulder'];
+  const tilt=ls&&rs?Math.abs(ls.position.y-rs.position.y):0;
+ 
+  if(tilt>28){desc=`Shoulder tilt ${Math.round(tilt)}px — try levelling shoulders.`;color='#F59E0B';bg='#FEF3C7';}
+  else if(label==='Sitting'){color='#7C3AED';bg='#EDE9FE';desc='Sitting detected. Ensure lumbar support & screen at eye level.';}
+  else if(label==='Crouching'){color='#CA8A04';bg='#FEF3C7';desc='Deep squat — keep knees over toes and back straight.';}
+  else if(label==='Bending Forward'){color='#DC2626';bg='#FEE2E2';desc='Forward bend — engage core to protect lower back.';}
+  else if(label==='Walking'){color='#16A34A';bg='#D1FAE5';desc='Walking gait detected — natural stride asymmetry.';}
+  else if(label==='T-Pose'){color='#9333EA';bg='#EDE9FE';desc='T-pose — arms spread at shoulder height.';}
+  else if(label==='Arms Raised'){color='#059669';bg='#D1FAE5';desc='Both arms elevated above shoulder level.';}
+  else if(label==='Standing'){color='#2563EB';bg='#DBEAFE';desc='Good upright posture detected.';}
+ 
+  // Knee hyperflexion warning
+  const lkA=angles.find(a=>a.label==='L. Knee'),rkA=angles.find(a=>a.label==='R. Knee');
+  if(lkA?.angle&&lkA.angle<60&&label!=='Crouching') desc+=' ⚠ L. knee hyperflexed.';
+  if(rkA?.angle&&rkA.angle<60&&label!=='Crouching') desc+=' ⚠ R. knee hyperflexed.';
+ 
+  document.getElementById('posture-title').textContent=title;
+  document.getElementById('posture-desc').textContent=desc;
+  document.getElementById('posture-icon-box').style.background=bg;
+  const pi=document.getElementById('posture-icon');
+  pi.style.color=color;pi.setAttribute('data-lucide',POSE_META[label]?.icon||'person-standing');
+  lucide.createIcons();
+}
+ 
+function updateAnalysis(kpMap,label,angles,confPct){
+  const el=document.getElementById('analysis-content');
+  const ls=kpMap['leftShoulder'],rs=kpMap['rightShoulder'];
+  const lh=kpMap['leftHip'],rh=kpMap['rightHip'];
+  const lw=kpMap['leftWrist'],rw=kpMap['rightWrist'];
+ 
+  const shW  =ls&&rs?Math.round(Math.abs(ls.position.x-rs.position.x)):'—';
+  const shTilt=ls&&rs?Math.round(Math.abs(ls.position.y-rs.position.y)):'—';
+  const hipW =lh&&rh?Math.round(Math.abs(lh.position.x-rh.position.x)):'—';
+  const sym  =ls&&rs&&lw&&rw?Math.max(0,100-Math.round(Math.abs((ls.position.y-lw.position.y)-(rs.position.y-rw.position.y))/3)):'—';
+  const validA=angles.filter(a=>a.angle!==null);
+  const romAvg=validA.length?Math.round(validA.reduce((s,a)=>s+a.angle,0)/validA.length)+'°':'—';
+  const meta=POSE_META[label]||POSE_META['Unknown'];
+ 
+  el.innerHTML=`
+    <div style="display:flex;flex-direction:column;gap:0;">
+      <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:0.07em;padding:6px 0 6px;">Body Metrics</div>
+      ${mr('Current Pose',`<span style="font-weight:700;color:${meta.color};">${label}</span>`)}
+      ${mr('Classification Conf.',confPct+'%')}
+      ${mr('Shoulder Width',shW+(shW!=='—'?' px':''))}
+      ${mr('Shoulder Tilt',shTilt+(shTilt!=='—'?' px':''))}
+      ${mr('Hip Width',hipW+(hipW!=='—'?' px':''))}
+      ${mr('Body Symmetry',sym+(sym!=='—'?'%':''))}
+      ${mr('Avg Joint Range',romAvg)}
+      <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:0.07em;padding:10px 0 6px;">Session Totals</div>
+      ${mr('Pose Changes',poseChangeCount)}
+      ${mr('Frames Analyzed',totalFrames)}
+      ${mr('Saved Logs',detectionLogs.length)}
+    </div>
+  `;
+}
+function mr(lbl,val){return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);"><span style="font-size:11px;color:var(--text-2);">${lbl}</span><span style="font-size:11px;font-family:'DM Mono',monospace;">${val}</span></div>`;}
+ 
+function resetStats(){
+  ['stat-fps','stat-conf','stat-kp','stat-frames','stat-changes'].forEach(id=>document.getElementById(id).textContent=id==='stat-conf'?'0%':'0');
+  document.getElementById('fps-badge').textContent='— FPS';
+  document.getElementById('conf-badge').textContent='— %';
+  document.getElementById('pose-badge').className='badge badge-gray';document.getElementById('pose-badge').textContent='No Pose';
+  document.getElementById('kp-list').innerHTML='';document.getElementById('angle-list').innerHTML='';
+  document.getElementById('conf-list').innerHTML='';document.getElementById('analysis-content').innerHTML='';
+  document.getElementById('pose-name-big').textContent='Awaiting Detection';
+  document.getElementById('pose-sub-text').textContent='Start camera or upload an image';
+  document.getElementById('pose-pct').textContent='—';
+  document.getElementById('posture-title').textContent='Waiting for Detection';
+  document.getElementById('posture-desc').textContent='Start camera or upload an image.';
+  document.getElementById('canvas-pose-tag').style.display='none';
+  document.getElementById('pose-banner').style.background='linear-gradient(135deg,#2563EB 0%,#7C3AED 100%)';
+  poseHistory=[];renderTimeline();
+  totalFrames=0;poseChangeCount=0;currentPose='Unknown';prevPose='Unknown';
+}
+function updateStatLogCount(){
+  document.getElementById('stat-logs').textContent=detectionLogs.length;
+  document.getElementById('log-count-bar').textContent=`${detectionLogs.length} entr${detectionLogs.length===1?'y':'ies'}`;
+}
+ 
+// ════════════════════════════════════════════════════
+// TOAST
+// ════════════════════════════════════════════════════
+function showToast(msg,color){
+  const t=document.getElementById('alert-toast');
+  document.getElementById('toast-text').textContent=msg;
+  t.style.borderLeft=`3px solid ${color||'#FBBF24'}`;
+  t.classList.add('show');
+  if(toastTimer)clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove('show'),2600);
+}
+ 
+// ════════════════════════════════════════════════════
+// SAVE LOG
+// ════════════════════════════════════════════════════
+function saveLog(poseArg){
+  const usePose=poseArg||window._lastPose;
+  if(!usePose)return;
+  const kpMap={};usePose.keypoints.forEach(k=>kpMap[k.part]=k);
+  const {label}=classifyPose(kpMap);
+  const entry={
+    timestamp:new Date().toISOString(),mode,poseLabel:label,
+    keypoints:usePose.keypoints.filter(k=>k.score>0.3).map(k=>({part:k.part,x:Math.round(k.position.x),y:Math.round(k.position.y),score:Math.round(k.score*100)}))
+  };
+  saveLogToDB(entry);
+  showToast('Log saved · '+label,'#2563EB');
+}
+ 
+// ════════════════════════════════════════════════════
+// ADMIN
+// ════════════════════════════════════════════════════
+document.getElementById('admin-btn').onclick=()=>{document.getElementById('pin-modal').classList.add('show');setTimeout(()=>document.getElementById('p1').focus(),100);};
+['p1','p2','p3','p4'].forEach((id,i,arr)=>{
+  const el=document.getElementById(id);
+  el.addEventListener('input',()=>{if(el.value&&i<arr.length-1)document.getElementById(arr[i+1]).focus();document.getElementById('pin-error').textContent='';});
+  el.addEventListener('keydown',e=>{if(e.key==='Backspace'&&!el.value&&i>0)document.getElementById(arr[i-1]).focus();if(e.key==='Enter')checkPin();});
+});
+function closePinModal(){document.getElementById('pin-modal').classList.remove('show');['p1','p2','p3','p4'].forEach(id=>document.getElementById(id).value='');document.getElementById('pin-error').textContent='';}
+function checkPin(){
+  const pin=['p1','p2','p3','p4'].map(id=>document.getElementById(id).value).join('');
+  if(pin==='1234'){closePinModal();openDrawer();}
+  else{document.getElementById('pin-error').textContent='Incorrect PIN.';['p1','p2','p3','p4'].forEach(id=>document.getElementById(id).value='');document.getElementById('p1').focus();}
+}
+function openDrawer(){document.getElementById('admin-drawer').classList.add('open');document.getElementById('drawer-overlay').classList.add('show');loadLogsFromDB();}
+function closeDrawer(){document.getElementById('admin-drawer').classList.remove('open');document.getElementById('drawer-overlay').classList.remove('show');}
+function renderLogs(){
+  const listEl=document.getElementById('log-list');listEl.innerHTML='';
+  if(!detectionLogs.length){listEl.innerHTML='<div style="padding:32px;text-align:center;color:var(--text-3);font-size:13px;">No detection logs yet.</div>';return;}
+  detectionLogs.forEach(log=>{
+    const row=document.createElement('div');row.className='log-row';
+    const d=new Date(log.timestamp);
+    const meta=POSE_META[log.poseLabel]||POSE_META['Unknown'];
+    row.innerHTML=`
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+        <span style="font-size:12px;font-weight:700;color:${meta.color};">${log.poseLabel||'Unknown'}</span>
+        <span class="badge badge-${log.mode==='live'?'blue':'green'}" style="font-size:9px;">${log.mode}</span>
+      </div>
+      <div style="font-size:10px;color:var(--text-3);">${d.toLocaleString()} · ${log.keypoints.length} keypoints</div>
+    `;
+    listEl.appendChild(row);
+  });
+  updateStatLogCount();
+}
+function exportCSV(){
+  if(!detectionLogs.length){alert('No logs to export.');return;}
+  const rows=[['ID','Timestamp','Mode','PoseLabel','Part','X','Y','Confidence%']];
+  detectionLogs.forEach((log,i)=>log.keypoints.forEach(kp=>rows.push([i+1,log.timestamp,log.mode,log.poseLabel||'',kp.part,kp.x,kp.y,kp.score])));
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'}));
+  a.download=`pose-logs-${Date.now()}.csv`;a.click();
+}
+function clearHistory(){if(!confirm('Clear all logs?'))return;clearLogsFromDB();}
+ 
+// ════════════════════════════════════════════════════
+// RESIZE
+// ════════════════════════════════════════════════════
+new ResizeObserver(()=>{const w=document.getElementById('canvas-wrap');canvas.width=w.offsetWidth;canvas.height=w.offsetHeight;}).observe(document.getElementById('canvas-wrap'));
+ 
+// ════════════════════════════════════════════════════
+// BOOT
+// ════════════════════════════════════════════════════
+lucide.createIcons();
+initDB();
+loadModel();
+document.getElementById('start-btn').disabled=true;
+document.getElementById('stop-btn').disabled=true;
+switchMode('live');
+</script>
+</body>
+</html>
