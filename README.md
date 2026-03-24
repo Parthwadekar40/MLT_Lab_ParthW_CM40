@@ -26,8 +26,8 @@ This series of projects is designed to provide a comprehensive understanding of 
 | 03 | [Sentiment Analysis](./Text-Sentiment-Analysis) | Natural Language Processing (NLP) to classify text. | ✅ Complete |
 | 04 | [Image Classification](./Image-classification) | Using MobileNet for instant browser-based recognition. | ✅ Complete |
 | 05 | [Real-time Object Detection](./Web-cam) | Webcam-based detection and frame-by-frame analysis. | ✅ Complete |
-| 06 | Pose Detection | Human body pose estimation using PoseNet. | ⏳ Coming Soon |
-| 07 | Model Deployment | Saving, reloading, and serving trained models locally. | ⏳ Coming Soon |
+| 06 | [Pose Detection](./Pose-Detection) | Human body pose estimation using PoseNet. | ✅ Complete |
+| 07 | [Model Deployment](./Model-in-Browser) | Saving, reloading, and serving trained models locally. | ✅ Complete |
 | 08 | Transfer Learning | Customizing MobileNet for specific image categories. | ⏳ Coming Soon |
 
 ---
