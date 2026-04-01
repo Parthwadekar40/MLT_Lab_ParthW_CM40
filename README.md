@@ -28,7 +28,7 @@ This series of projects is designed to provide a comprehensive understanding of 
 | 05 | [Real-time Object Detection](./Web-cam) | Webcam-based detection and frame-by-frame analysis. | ✅ Complete |
 | 06 | [Pose Detection](./Pose-Detection) | Human body pose estimation using PoseNet. | ✅ Complete |
 | 07 | [Model Deployment](./Model-in-Browser) | Saving, reloading, and serving trained models locally. | ✅ Complete |
-| 08 | Transfer Learning | Customizing MobileNet for specific image categories. | ⏳ Coming Soon |
+| 08 | [Transfer Learning](./Transfer-learning) | Customizing MobileNet for specific image categories. | ✅ Complete |
 
 ---
 
