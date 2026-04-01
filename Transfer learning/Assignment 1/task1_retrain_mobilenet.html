@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task 1 — Transfer Learning: Train MobileNet</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;500;700&display=swap');
+
+  :root {
+    --bg: #050810;
+    --panel: #0b1020;
+    --border: #1a2a4a;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --accent3: #39ff14;
+    --text: #c8d8f0;
+    --dim: #4a6080;
+    --glow: 0 0 12px rgba(0,212,255,0.4);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: 
+      radial-gradient(ellipse 80% 40% at 20% 10%, rgba(0,212,255,0.04) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 30% at 80% 90%, rgba(255,107,53,0.04) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex; align-items: center; gap: 16px;
+    background: rgba(11,16,32,0.9);
+    backdrop-filter: blur(10px);
+    position: sticky; top: 0; z-index: 100;
+  }
+
+  .tag {
+    background: var(--accent);
+    color: #000;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 3px 8px;
+    letter-spacing: 2px;
+    font-weight: 700;
+  }
+
+  header h1 {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #fff;
+  }
+
+  header p { font-size: 12px; color: var(--dim); font-family: 'Share Tech Mono', monospace; margin-left: auto; }
+
+  .main { position: relative; z-index: 1; padding: 24px 32px; max-width: 1400px; margin: 0 auto; }
+
+  .grid { display: grid; grid-template-columns: 1fr 360px; gap: 24px; align-items: start; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 20px;
+    position: relative;
+  }
+  .panel::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), transparent);
+  }
+
+  .panel-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel-title::after { content:''; flex:1; height:1px; background: var(--border); }
+
+  video, canvas {
+    width: 100%;
+    display: block;
+    background: #000;
+    border: 1px solid var(--border);
+  }
+
+  #preview-canvas { margin-top: 12px; }
+
+  .classes-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+
+  .class-card {
+    border: 1px solid var(--border);
+    padding: 14px;
+    text-align: center;
+    position: relative;
+    transition: border-color 0.2s;
+    cursor: pointer;
+  }
+  .class-card:hover { border-color: var(--accent); }
+  .class-card.active { border-color: var(--accent); box-shadow: var(--glow); }
+  .class-card.active::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: rgba(0,212,255,0.04);
+    pointer-events: none;
+  }
+
+  .class-name-input {
+    width: 100%; background: transparent;
+    border: none; border-bottom: 1px solid var(--dim);
+    color: #fff; font-family: 'Rajdhani', sans-serif;
+    font-size: 14px; font-weight: 700;
+    text-align: center; padding: 4px;
+    letter-spacing: 1px;
+    outline: none;
+    margin-bottom: 10px;
+  }
+
+  .sample-count {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 28px;
+    color: var(--accent);
+    display: block;
+    margin: 6px 0;
+  }
+
+  .btn {
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    background: transparent;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+    margin-top: 8px;
+  }
+  .btn:hover { background: rgba(0,212,255,0.1); box-shadow: var(--glow); }
+  .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .btn.primary { border-color: var(--accent3); color: var(--accent3); }
+  .btn.primary:hover { background: rgba(57,255,20,0.1); box-shadow: 0 0 12px rgba(57,255,20,0.3); }
+  .btn.danger { border-color: var(--accent2); color: var(--accent2); }
+
+  .training-controls { margin-top: 16px; }
+
+  .param-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px; font-size: 13px; color: var(--dim);
+  }
+  .param-row label { font-weight: 500; }
+  .param-row input[type=range] {
+    width: 120px; accent-color: var(--accent);
+  }
+  .param-val {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px; color: var(--accent); width: 40px; text-align: right;
+  }
+
+  .progress-wrap { margin: 16px 0; }
+  .progress-label { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--dim); margin-bottom: 6px; display:flex; justify-content: space-between; }
+  .progress-bar { height: 4px; background: var(--border); position: relative; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent3)); width: 0%; transition: width 0.3s; }
+
+  .log-box {
+    background: #000;
+    border: 1px solid var(--border);
+    padding: 12px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    height: 180px;
+    overflow-y: auto;
+    color: var(--accent3);
+    line-height: 1.8;
+  }
+  .log-box .err { color: var(--accent2); }
+  .log-box .info { color: var(--accent); }
+  .log-box .dim { color: var(--dim); }
+
+  .status-row {
+    display: flex; align-items: center; gap: 12px; margin-top: 12px;
+  }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  .status-dot.active { background: var(--accent3); box-shadow: 0 0 6px var(--accent3); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: 0.4; } }
+
+  .pred-bar-wrap { margin-top: 12px; }
+  .pred-item { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .pred-label { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--dim); width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pred-track { flex: 1; height: 6px; background: var(--border); border-radius: 0; overflow: hidden; }
+  .pred-fill { height: 100%; background: var(--accent); transition: width 0.15s; border-radius: 0; }
+  .pred-pct { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--accent); width: 42px; text-align: right; }
+
+  .scan-line {
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: scan 3s linear infinite;
+    opacity: 0.6; pointer-events: none;
+  }
+  @keyframes scan { 0%{top:0} 100%{top:100%} }
+
+  .corner-tl, .corner-br {
+    position: absolute; width: 12px; height: 12px;
+    border-color: var(--accent); border-style: solid;
+  }
+  .corner-tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
+  .corner-br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+
+  .model-status {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    padding: 4px 10px;
+    border: 1px solid;
+    display: inline-block;
+    margin-bottom: 12px;
+  }
+  .model-status.loading { color: var(--accent2); border-color: var(--accent2); }
+  .model-status.ready { color: var(--accent3); border-color: var(--accent3); }
+
+</style>
+</head>
+<body>
+
+<header>
+  <div class="tag">TASK 01</div>
+  <h1>Transfer Learning — MobileNet Retraining</h1>
+  <p>3-CLASS CUSTOM DATASET · LIVE CAMERA</p>
+</header>
+
+<div class="main">
+  <div class="grid">
+    <!-- LEFT: Camera + Classes -->
+    <div>
+      <div class="panel" style="margin-bottom:24px; position:relative;">
+        <div class="scan-line"></div>
+        <div class="corner-tl"></div><div class="corner-br"></div>
+        <div class="panel-title">// LIVE CAMERA FEED</div>
+        <div class="status-row" style="margin-bottom:12px;">
+          <div id="status-dot" class="status-dot"></div>
+          <span id="model-status" class="model-status loading">⌛ LOADING MOBILENET...</span>
+        </div>
+        <video id="webcam" autoplay playsinline muted style="max-height:300px; object-fit:cover;"></video>
+        <canvas id="preview-canvas" height="80" style="display:none;"></canvas>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">// DEFINE & CAPTURE CLASSES</div>
+        <div class="classes-grid" id="classes-grid">
+          <!-- Dynamically generated -->
+        </div>
+        <button class="btn" id="btn-start-camera" style="margin-top:16px;">▶ START CAMERA</button>
+      </div>
+    </div>
+
+    <!-- RIGHT: Training Controls + Log -->
+    <div>
+      <div class="panel" style="margin-bottom:16px;">
+        <div class="panel-title">// TRAINING CONFIG</div>
+
+        <div class="param-row">
+          <label>Epochs</label>
+          <input type="range" id="param-epochs" min="5" max="100" value="30" oninput="document.getElementById('val-epochs').textContent=this.value">
+          <span class="param-val" id="val-epochs">30</span>
+        </div>
+        <div class="param-row">
+          <label>Learning Rate</label>
+          <input type="range" id="param-lr" min="1" max="50" value="10" oninput="document.getElementById('val-lr').textContent='0.00'+this.value">
+          <span class="param-val" id="val-lr">0.0010</span>
+        </div>
+        <div class="param-row">
+          <label>Batch Size</label>
+          <input type="range" id="param-batch" min="1" max="32" value="16" oninput="document.getElementById('val-batch').textContent=this.value">
+          <span class="param-val" id="val-batch">16</span>
+        </div>
+        <div class="param-row">
+          <label>Dense Units</label>
+          <input type="range" id="param-dense" min="16" max="256" step="16" value="64" oninput="document.getElementById('val-dense').textContent=this.value">
+          <span class="param-val" id="val-dense">64</span>
+        </div>
+
+        <div class="progress-wrap">
+          <div class="progress-label"><span id="epoch-label">EPOCH 0/0</span><span id="loss-label">LOSS —</span></div>
+          <div class="progress-bar"><div class="progress-fill" id="epoch-progress"></div></div>
+        </div>
+
+        <button class="btn primary" id="btn-train">⚡ START TRAINING</button>
+        <button class="btn" id="btn-predict" disabled style="margin-top:8px;">🔍 LIVE PREDICT</button>
+        <button class="btn danger" id="btn-clear" style="margin-top:8px;">✕ CLEAR ALL DATA</button>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px;">
+        <div class="panel-title">// LIVE PREDICTIONS</div>
+        <div id="pred-bars" class="pred-bar-wrap">
+          <p style="font-size:12px; color:var(--dim); font-family:'Share Tech Mono',monospace;">Train a model to see predictions</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">// SYSTEM LOG</div>
+        <div class="log-box" id="log-box">
+          <span class="info">[INIT] TensorFlow.js loading...</span><br>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let mobilenet = null;
+let classifier = null;
+let webcamStream = null;
+let predicting = false;
+let classNames = ['CLASS_A', 'CLASS_B', 'CLASS_C'];
+let sampleCounts = [0, 0, 0];
+let xs = null, ys = null;
+let isTrained = false;
+
+const logBox = document.getElementById('log-box');
+function log(msg, type='') {
+  const line = document.createElement('span');
+  line.className = type;
+  line.innerHTML = msg;
+  logBox.appendChild(line);
+  logBox.appendChild(document.createElement('br'));
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+function buildClassCards() {
+  const grid = document.getElementById('classes-grid');
+  grid.innerHTML = '';
+  classNames.forEach((name, i) => {
+    const colors = ['#00d4ff','#ff6b35','#39ff14'];
+    grid.innerHTML += `
+    <div class="class-card" id="card-${i}">
+      <input class="class-name-input" value="${name}" 
+        style="border-bottom-color:${colors[i]};color:${colors[i]}"
+        oninput="classNames[${i}]=this.value; updatePredBars()">
+      <span class="sample-count" id="count-${i}" style="color:${colors[i]}">0</span>
+      <div style="font-size:11px;color:var(--dim);font-family:'Share Tech Mono',monospace;margin-bottom:8px;">SAMPLES</div>
+      <button class="btn" onclick="captureClass(${i})" 
+        style="border-color:${colors[i]};color:${colors[i]}"
+        id="btn-cap-${i}">⊕ CAPTURE</button>
+    </div>`;
+  });
+}
+buildClassCards();
+
+async function startCamera() {
+  try {
+    webcamStream = await navigator.mediaDevices.getUserMedia({ video: { width:640, height:480 }, audio: false });
+    const vid = document.getElementById('webcam');
+    vid.srcObject = webcamStream;
+    document.getElementById('status-dot').classList.add('active');
+    document.getElementById('btn-start-camera').disabled = true;
+    log('[CAM] Camera stream active', 'info');
+  } catch(e) {
+    log('[ERR] Camera access denied: ' + e.message, 'err');
+  }
+}
+
+async function loadMobileNet() {
+  try {
+    log('[NET] Downloading MobileNet v2...', 'dim');
+    mobilenet = await window.mobilenet.load({ version: 2, alpha: 1.0 });
+    document.getElementById('model-status').textContent = '✓ MOBILENET READY';
+    document.getElementById('model-status').className = 'model-status ready';
+    log('[NET] MobileNet v2 loaded — using as feature extractor', 'info');
+    log('[NET] Output: 1280-dim embedding vector', 'dim');
+  } catch(e) {
+    log('[ERR] ' + e.message, 'err');
+  }
+}
+
+function getEmbedding(videoEl) {
+  return tf.tidy(() => {
+    const img = tf.browser.fromPixels(videoEl);
+    const resized = tf.image.resizeBilinear(img, [224, 224]);
+    const normalized = resized.div(127.5).sub(1);
+    const batched = normalized.expandDims(0);
+    const internalModel = mobilenet.model;
+    // Use the layer before softmax as feature extractor
+    const embedding = internalModel.predict(batched);
+    return embedding.reshape([1, -1]);
+  });
+}
+
+function captureClass(classIdx) {
+  const vid = document.getElementById('webcam');
+  if (!vid.srcObject) { log('[WARN] Start camera first', 'err'); return; }
+  if (!mobilenet) { log('[WARN] MobileNet not loaded yet', 'err'); return; }
+
+  const embedding = getEmbedding(vid);
+  const label = tf.tidy(() => tf.oneHot(tf.tensor1d([classIdx], 'int32'), 3));
+
+  if (xs === null) {
+    xs = tf.keep(embedding);
+    ys = tf.keep(label);
+  } else {
+    const oldXs = xs;
+    xs = tf.keep(tf.concat([oldXs, embedding], 0));
+    oldXs.dispose();
+
+    const oldYs = ys;
+    ys = tf.keep(tf.concat([oldYs, label], 0));
+    oldYs.dispose();
+
+    embedding.dispose();
+    label.dispose();
+  }
+
+  sampleCounts[classIdx]++;
+  document.getElementById(`count-${classIdx}`).textContent = sampleCounts[classIdx];
+  log(`[DATA] Class "${classNames[classIdx]}" → sample #${sampleCounts[classIdx]} captured`, 'dim');
+}
+
+async function trainModel() {
+  if (!xs) { log('[ERR] Capture samples for all classes first', 'err'); return; }
+  const totalSamples = sampleCounts.reduce((a,b)=>a+b,0);
+  if (totalSamples < 9) { log('[ERR] Need at least 3 samples per class', 'err'); return; }
+
+  const epochs = parseInt(document.getElementById('param-epochs').value);
+  const lr = parseInt(document.getElementById('param-lr').value) * 0.0001;
+  const batchSize = parseInt(document.getElementById('param-batch').value);
+  const denseUnits = parseInt(document.getElementById('param-dense').value);
+
+  const inputShape = xs.shape[1];
+
+  if (classifier) classifier.dispose();
+
+  classifier = tf.sequential({
+    layers: [
+      tf.layers.dense({ inputShape: [inputShape], units: denseUnits, activation: 'relu',
+        kernelInitializer: 'varianceScaling' }),
+      tf.layers.dropout({ rate: 0.3 }),
+      tf.layers.dense({ units: 3, activation: 'softmax',
+        kernelInitializer: 'varianceScaling' })
+    ]
+  });
+
+  classifier.compile({
+    optimizer: tf.train.adam(lr),
+    loss: 'categoricalCrossentropy',
+    metrics: ['accuracy']
+  });
+
+  log(`[TRAIN] Architecture: ${inputShape}→${denseUnits}→3`, 'info');
+  log(`[TRAIN] LR=${lr.toFixed(4)}, Epochs=${epochs}, Batch=${batchSize}`, 'dim');
+  log('[TRAIN] Training started...', 'info');
+
+  const btn = document.getElementById('btn-train');
+  btn.disabled = true; btn.textContent = '⏳ TRAINING...';
+
+  await classifier.fit(xs, ys, {
+    epochs,
+    batchSize,
+    shuffle: true,
+    callbacks: {
+      onEpochEnd: async (epoch, logs) => {
+        const pct = Math.round(((epoch+1)/epochs)*100);
+        document.getElementById('epoch-progress').style.width = pct + '%';
+        document.getElementById('epoch-label').textContent = `EPOCH ${epoch+1}/${epochs}`;
+        document.getElementById('loss-label').textContent = `LOSS ${logs.loss.toFixed(4)} · ACC ${(logs.acc*100).toFixed(1)}%`;
+        if ((epoch+1) % 5 === 0 || epoch === 0) {
+          log(`[EP ${String(epoch+1).padStart(3,'0')}] loss=${logs.loss.toFixed(4)} acc=${(logs.acc*100).toFixed(1)}%`, 'dim');
+        }
+      }
+    }
+  });
+
+  isTrained = true;
+  btn.disabled = false; btn.textContent = '⚡ RETRAIN';
+  document.getElementById('btn-predict').disabled = false;
+  log('[DONE] Training complete ✓', 'info');
+  updatePredBars();
+}
+
+let predInterval = null;
+function togglePredict() {
+  const btn = document.getElementById('btn-predict');
+  if (!predicting) {
+    predicting = true;
+    btn.textContent = '⏹ STOP PREDICT';
+    btn.style.borderColor = 'var(--accent2)';
+    btn.style.color = 'var(--accent2)';
+    predInterval = setInterval(runPrediction, 150);
+    log('[PRED] Live prediction started', 'info');
+  } else {
+    predicting = false;
+    clearInterval(predInterval);
+    btn.textContent = '🔍 LIVE PREDICT';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+    log('[PRED] Prediction stopped', 'dim');
+  }
+}
+
+async function runPrediction() {
+  if (!classifier || !isTrained) return;
+  const vid = document.getElementById('webcam');
+  if (!vid.srcObject) return;
+  const emb = getEmbedding(vid);
+  const pred = tf.tidy(() => classifier.predict(emb));
+  const probs = await pred.data();
+  pred.dispose(); emb.dispose();
+  renderPredBars(Array.from(probs));
+}
+
+function updatePredBars() {
+  if (!isTrained) return;
+  renderPredBars([0, 0, 0]);
+}
+
+function renderPredBars(probs) {
+  const colors = ['#00d4ff','#ff6b35','#39ff14'];
+  const container = document.getElementById('pred-bars');
+  container.innerHTML = '';
+  probs.forEach((p, i) => {
+    const pct = (p * 100).toFixed(1);
+    container.innerHTML += `
+    <div class="pred-item">
+      <div class="pred-label">${classNames[i]}</div>
+      <div class="pred-track">
+        <div class="pred-fill" style="width:${pct}%;background:${colors[i]};"></div>
+      </div>
+      <div class="pred-pct" style="color:${colors[i]}">${pct}%</div>
+    </div>`;
+  });
+}
+
+function clearAll() {
+  if (xs) { xs.dispose(); xs = null; }
+  if (ys) { ys.dispose(); ys = null; }
+  sampleCounts = [0, 0, 0];
+  isTrained = false;
+  for (let i=0;i<3;i++) document.getElementById(`count-${i}`).textContent = 0;
+  document.getElementById('btn-predict').disabled = true;
+  document.getElementById('epoch-progress').style.width = '0%';
+  document.getElementById('pred-bars').innerHTML = '<p style="font-size:12px;color:var(--dim);font-family:\'Share Tech Mono\',monospace;">Train a model to see predictions</p>';
+  log('[CLEAR] All data cleared', 'err');
+}
+
+document.getElementById('btn-start-camera').addEventListener('click', startCamera);
+document.getElementById('btn-train').addEventListener('click', trainModel);
+document.getElementById('btn-predict').addEventListener('click', togglePredict);
+document.getElementById('btn-clear').addEventListener('click', clearAll);
+
+// Init
+loadMobileNet().then(() => log('[READY] System ready — start camera and capture samples', 'info'));
+</script>
+</body>
+</html>

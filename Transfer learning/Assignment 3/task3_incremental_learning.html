@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task 3 — Incremental Learning & Performance Analysis</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;500;700&display=swap');
+
+  :root {
+    --bg: #060a08;
+    --panel: #0a100c;
+    --border: #1a3020;
+    --accent: #00ff88;
+    --accent2: #ff9500;
+    --accent3: #00ccff;
+    --text: #c0d8c8;
+    --dim: #3a5040;
+    --glow: 0 0 14px rgba(0,255,136,0.35);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(ellipse 80% 50% at 0% 0%, rgba(0,255,136,0.04) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 100% 100%, rgba(0,204,255,0.04) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex; align-items: center; gap: 16px;
+    background: rgba(10,16,12,0.92);
+    backdrop-filter: blur(10px);
+    position: sticky; top: 0; z-index: 100;
+  }
+
+  .tag {
+    background: var(--accent);
+    color: #000;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 3px 8px;
+    letter-spacing: 2px;
+    font-weight: 700;
+  }
+
+  header h1 { font-size: 18px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: #fff; }
+  header p { font-size: 11px; color: var(--dim); font-family: 'Share Tech Mono', monospace; margin-left: auto; }
+
+  .main { padding: 24px 32px; max-width: 1400px; margin: 0 auto; position: relative; z-index: 1; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 20px;
+    position: relative;
+    margin-bottom: 20px;
+  }
+  .panel::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent), transparent);
+  }
+
+  .panel-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px; letter-spacing: 3px;
+    color: var(--accent); text-transform: uppercase;
+    margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel-title::after { content:''; flex:1; height:1px; background: var(--border); }
+
+  .layout-top { display: grid; grid-template-columns: 280px 1fr 280px; gap: 20px; }
+
+  video { width: 100%; display: block; background: #000; border: 1px solid var(--border); }
+
+  .classes-container { }
+  .classes-scroll { display: flex; flex-direction: column; gap: 10px; max-height: 360px; overflow-y: auto; }
+  .class-row {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--border);
+    padding: 10px 12px;
+    transition: border-color 0.2s;
+    position: relative;
+  }
+  .class-row.new-class { border-color: var(--accent2); }
+  .class-row.new-class::before {
+    content: 'NEW';
+    position: absolute; top: -1px; right: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px; color: var(--accent2);
+    letter-spacing: 1px;
+    background: var(--panel);
+    padding: 0 4px;
+  }
+
+  .class-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .class-name-input {
+    flex: 1; background: transparent; border: none;
+    color: #fff; font-family: 'Rajdhani', sans-serif;
+    font-size: 14px; font-weight: 500;
+    outline: none;
+  }
+  .class-count {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 16px; min-width: 28px; text-align: right;
+  }
+  .btn-cap-sm {
+    font-family: 'Share Tech Mono', monospace; font-size: 10px;
+    letter-spacing: 1px; border: 1px solid;
+    padding: 5px 10px; cursor: pointer; background: transparent;
+    transition: all 0.2s; flex-shrink: 0;
+  }
+  .btn-cap-sm:hover { filter: brightness(1.3); }
+  .btn-del-sm {
+    font-family: 'Share Tech Mono', monospace; font-size: 12px;
+    color: var(--dim); background: transparent; border: none;
+    cursor: pointer; padding: 0 4px; flex-shrink: 0;
+  }
+  .btn-del-sm:hover { color: var(--accent2); }
+
+  .add-class-btn {
+    width: 100%; margin-top: 10px;
+    font-family: 'Rajdhani', sans-serif; font-weight: 700;
+    font-size: 12px; letter-spacing: 2px; text-transform: uppercase;
+    border: 1px dashed var(--accent2);
+    color: var(--accent2); background: transparent;
+    padding: 10px; cursor: pointer; transition: all 0.2s;
+  }
+  .add-class-btn:hover { background: rgba(255,149,0,0.08); }
+
+  .btn {
+    font-family: 'Rajdhani', sans-serif; font-weight: 700;
+    font-size: 12px; letter-spacing: 2px; text-transform: uppercase;
+    border: 1px solid var(--accent); color: var(--accent);
+    background: transparent; padding: 9px 16px;
+    cursor: pointer; transition: all 0.2s; width: 100%;
+    margin-top: 8px;
+  }
+  .btn:hover { background: rgba(0,255,136,0.08); box-shadow: var(--glow); }
+  .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .btn.orange { border-color: var(--accent2); color: var(--accent2); }
+  .btn.orange:hover { background: rgba(255,149,0,0.08); }
+  .btn.blue { border-color: var(--accent3); color: var(--accent3); }
+
+  .param-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px; font-size: 13px; color: var(--dim);
+  }
+  .param-val { font-family: 'Share Tech Mono', monospace; font-size: 12px; color: var(--accent); width: 40px; text-align: right; }
+
+  .prog-wrap { margin: 10px 0; }
+  .prog-lbl { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--dim); margin-bottom:4px; display:flex; justify-content:space-between; }
+  .prog-bar { height: 3px; background: var(--border); overflow: hidden; }
+  .prog-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent3)); width: 0%; transition: width 0.3s; }
+
+  /* Accuracy Chart */
+  .chart-area { position: relative; }
+  #acc-chart {
+    width: 100%; height: 220px;
+    border: 1px solid var(--border);
+    background: #000;
+    display: block;
+  }
+
+  /* Sessions Table */
+  .sessions-table { width: 100%; border-collapse: collapse; font-family: 'Share Tech Mono', monospace; font-size: 12px; }
+  .sessions-table th { text-align: left; padding: 8px 12px; font-size: 10px; color: var(--dim); letter-spacing: 2px; border-bottom: 1px solid var(--border); text-transform: uppercase; }
+  .sessions-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .sessions-table tr:last-child td { border-bottom: none; }
+  .sessions-table tr:hover td { background: rgba(0,255,136,0.03); }
+
+  .badge {
+    font-family: 'Share Tech Mono', monospace; font-size: 9px;
+    padding: 2px 6px; letter-spacing: 1px; text-transform: uppercase;
+    border: 1px solid; display: inline-block;
+  }
+  .badge.new { color: var(--accent2); border-color: var(--accent2); }
+  .badge.good { color: var(--accent); border-color: var(--accent); }
+  .badge.warn { color: #ffcc00; border-color: #ffcc00; }
+
+  .delta {
+    font-size: 11px;
+    font-family: 'Share Tech Mono', monospace;
+  }
+  .delta.up { color: var(--accent); }
+  .delta.down { color: var(--accent2); }
+
+  /* Live predictions */
+  .pred-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+  .pred-name { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--dim); width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pred-track { flex: 1; height: 5px; background: var(--border); }
+  .pred-fill { height: 100%; transition: width 0.15s; }
+  .pred-pct { font-family: 'Share Tech Mono', monospace; font-size: 10px; width: 40px; text-align: right; }
+
+  .log-box {
+    background: #000; border: 1px solid var(--border);
+    padding: 10px; font-family: 'Share Tech Mono', monospace;
+    font-size: 11px; height: 120px; overflow-y: auto;
+    color: var(--accent); line-height: 1.8;
+  }
+  .log-box .err { color: var(--accent2); }
+  .log-box .info { color: var(--accent3); }
+  .log-box .dim { color: var(--dim); }
+
+  /* Analysis insights */
+  .insights { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; margin-bottom: 20px; }
+  .insight-card {
+    border: 1px solid var(--border); padding: 16px;
+    position: relative;
+  }
+  .insight-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: var(--accent3); opacity: 0.3;
+  }
+  .insight-val { font-family: 'Share Tech Mono', monospace; font-size: 28px; color: var(--accent3); }
+  .insight-label { font-size: 11px; color: var(--dim); letter-spacing: 2px; margin-top: 4px; text-transform: uppercase; }
+  .insight-sub { font-size: 11px; color: var(--dim); font-family: 'Share Tech Mono', monospace; margin-top: 6px; }
+
+  .bottom-grid { display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="tag">TASK 03</div>
+  <h1>Incremental Learning — Add Classes & Analyze Performance</h1>
+  <p>LIVE CATEGORY EXPANSION · PERFORMANCE TRACKING</p>
+</header>
+
+<div class="main">
+
+  <!-- Top: Camera | Classes | Config -->
+  <div class="layout-top" style="margin-bottom:20px;">
+
+    <!-- Camera -->
+    <div class="panel" style="margin-bottom:0">
+      <div class="panel-title">// CAMERA</div>
+      <video id="webcam" autoplay playsinline muted style="max-height:260px;object-fit:cover;"></video>
+      <button class="btn" id="btn-cam" style="margin-top:10px;">▶ START CAMERA</button>
+
+      <div class="panel-title" style="margin-top:16px;">// LIVE PREDICT</div>
+      <div id="pred-box"><p style="font-size:11px;color:var(--dim);font-family:'Share Tech Mono',monospace;">Train to see predictions</p></div>
+      <button class="btn blue" id="btn-predict" disabled style="margin-top:8px;">🔍 TOGGLE PREDICT</button>
+    </div>
+
+    <!-- Classes -->
+    <div class="panel" style="margin-bottom:0;">
+      <div class="panel-title">
+        // CLASSES
+        <span style="font-size:10px;color:var(--dim);margin-left:8px;" id="class-count-label">3 CLASSES</span>
+      </div>
+      <div class="classes-scroll" id="classes-scroll"></div>
+      <button class="add-class-btn" id="btn-add-class">+ ADD NEW CLASS</button>
+    </div>
+
+    <!-- Config + Log -->
+    <div class="panel" style="margin-bottom:0;">
+      <div class="panel-title">// TRAIN CONFIG</div>
+      <div class="param-row">
+        <label>Epochs</label>
+        <input type="range" id="p-epochs" min="5" max="100" value="35"
+          oninput="document.getElementById('v-epochs').textContent=this.value">
+        <span class="param-val" id="v-epochs">35</span>
+      </div>
+      <div class="param-row">
+        <label>LR ×10⁻⁴</label>
+        <input type="range" id="p-lr" min="1" max="50" value="10"
+          oninput="document.getElementById('v-lr').textContent=this.value">
+        <span class="param-val" id="v-lr">10</span>
+      </div>
+      <div class="param-row">
+        <label>Batch</label>
+        <input type="range" id="p-batch" min="4" max="32" value="16"
+          oninput="document.getElementById('v-batch').textContent=this.value">
+        <span class="param-val" id="v-batch">16</span>
+      </div>
+      <div class="param-row">
+        <label>Hidden</label>
+        <input type="range" id="p-dense" min="16" max="256" step="16" value="128"
+          oninput="document.getElementById('v-dense').textContent=this.value">
+        <span class="param-val" id="v-dense">128</span>
+      </div>
+
+      <div class="prog-wrap">
+        <div class="prog-lbl"><span id="ep-lbl">EPOCH 0/0</span><span id="loss-lbl">LOSS —</span></div>
+        <div class="prog-bar"><div class="prog-fill" id="prog-fill"></div></div>
+      </div>
+
+      <button class="btn" id="btn-train">⚡ TRAIN SESSION</button>
+      <button class="btn orange" id="btn-reset-history" style="margin-top:6px;">↺ RESET HISTORY</button>
+
+      <div class="panel-title" style="margin-top:16px;">// LOG</div>
+      <div class="log-box" id="log-box"><span class="info">[INIT] Loading MobileNet v2...</span><br></div>
+    </div>
+  </div>
+
+  <!-- Insights Row -->
+  <div class="insights" id="insights">
+    <div class="insight-card">
+      <div class="insight-val" id="ins-sessions">0</div>
+      <div class="insight-label">Training Sessions</div>
+      <div class="insight-sub" id="ins-session-sub">No sessions yet</div>
+    </div>
+    <div class="insight-card">
+      <div class="insight-val" id="ins-best">—</div>
+      <div class="insight-label">Best Val Accuracy</div>
+      <div class="insight-sub" id="ins-best-sub">—</div>
+    </div>
+    <div class="insight-card">
+      <div class="insight-val" id="ins-trend">—</div>
+      <div class="insight-label">Accuracy Trend</div>
+      <div class="insight-sub" id="ins-trend-sub">—</div>
+    </div>
+  </div>
+
+  <!-- Chart + Table -->
+  <div class="bottom-grid">
+    <div>
+      <div class="panel" style="margin-bottom:20px;">
+        <div class="panel-title">// ACCURACY HISTORY CHART</div>
+        <canvas id="acc-chart"></canvas>
+        <div style="display:flex;gap:20px;margin-top:10px;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <div style="width:20px;height:2px;background:var(--accent)"></div>
+            <span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim)">TRAIN ACC</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <div style="width:20px;height:2px;background:var(--accent2)"></div>
+            <span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim)">VAL ACC</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <div style="width:10px;height:10px;border-radius:50%;background:var(--accent3)"></div>
+            <span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim)">CLASS ADDED</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">// SESSION HISTORY</div>
+        <div id="sessions-table-wrap">
+          <p style="font-size:12px;color:var(--dim);font-family:'Share Tech Mono',monospace;">No sessions recorded yet</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analysis -->
+    <div class="panel">
+      <div class="panel-title">// PERFORMANCE ANALYSIS</div>
+      <div id="analysis-box">
+        <p style="font-size:12px;color:var(--dim);font-family:'Share Tech Mono',monospace;">Run training sessions to analyze incremental performance changes</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let mobilenet = null;
+let classifier = null;
+let predicting = false;
+let predInterval = null;
+
+// Class management
+let classes = [
+  { name: 'CLASS_A', embeddings: [], isNew: false },
+  { name: 'CLASS_B', embeddings: [], isNew: false },
+  { name: 'CLASS_C', embeddings: [], isNew: false },
+];
+
+// Session history
+let sessions = []; // { sessionId, numClasses, classNames, trainAcc, valAcc, trainLoss, valLoss, newClassAdded }
+
+const PALETTE = ['#00ff88','#ff9500','#00ccff','#ff44aa','#ffee00','#aa44ff','#ff6644','#44ffcc'];
+
+const logBox = document.getElementById('log-box');
+function log(msg, type='') {
+  const s = document.createElement('span');
+  s.className = type;
+  s.innerHTML = msg;
+  logBox.appendChild(s);
+  logBox.appendChild(document.createElement('br'));
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+function getColor(i) { return PALETTE[i % PALETTE.length]; }
+
+function buildClassRows() {
+  const scroll = document.getElementById('classes-scroll');
+  scroll.innerHTML = '';
+  classes.forEach((cls, i) => {
+    const color = getColor(i);
+    const row = document.createElement('div');
+    row.className = 'class-row' + (cls.isNew ? ' new-class' : '');
+    row.innerHTML = `
+      <div class="class-dot" style="background:${color}"></div>
+      <input class="class-name-input" value="${cls.name}" placeholder="Class name"
+        oninput="classes[${i}].name=this.value; updatePredBars()">
+      <div class="class-count" style="color:${color}" id="cnt-${i}">${cls.embeddings.length}</div>
+      <button class="btn-cap-sm" onclick="capture(${i})"
+        style="color:${color};border-color:${color}">CAP</button>
+      ${classes.length > 2 ? `<button class="btn-del-sm" onclick="deleteClass(${i})">✕</button>` : ''}
+    `;
+    scroll.appendChild(row);
+  });
+  document.getElementById('class-count-label').textContent = classes.length + ' CLASSES';
+}
+buildClassRows();
+
+function addNewClass() {
+  classes.push({ name: `CLASS_${String.fromCharCode(65+classes.length)}`, embeddings: [], isNew: true });
+  buildClassRows();
+  log(`[CLASS] New class added — total: ${classes.length}`, 'info');
+}
+
+function deleteClass(i) {
+  if (classes.length <= 2) { log('[WARN] Need at least 2 classes', 'err'); return; }
+  classes[i].embeddings.forEach(e => e.dispose());
+  classes.splice(i, 1);
+  buildClassRows();
+  log(`[CLASS] Class removed — total: ${classes.length}`, 'err');
+}
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{width:640,height:480}, audio:false });
+    document.getElementById('webcam').srcObject = stream;
+    document.getElementById('btn-cam').disabled = true;
+    log('[CAM] Camera active', 'info');
+  } catch(e) { log('[ERR] '+e.message, 'err'); }
+}
+
+async function loadMobileNet() {
+  mobilenet = await window.mobilenet.load({ version:2, alpha:1.0 });
+  log('[NET] MobileNet v2 loaded — feature extractor ready', 'info');
+}
+
+function extractEmb(vid) {
+  return tf.tidy(() => {
+    const img = tf.browser.fromPixels(vid);
+    const resized = tf.image.resizeBilinear(img,[224,224]);
+    const norm = resized.div(127.5).sub(1).expandDims(0);
+    return mobilenet.model.predict(norm).reshape([1,-1]);
+  });
+}
+
+function capture(classIdx) {
+  const vid = document.getElementById('webcam');
+  if (!vid.srcObject) { log('[WARN] Start camera first','err'); return; }
+  if (!mobilenet) { log('[WARN] Model loading','err'); return; }
+  const emb = extractEmb(vid);
+  classes[classIdx].embeddings.push(tf.keep(emb));
+  document.getElementById(`cnt-${classIdx}`).textContent = classes[classIdx].embeddings.length;
+  log(`[DATA] "${classes[classIdx].name}" → ${classes[classIdx].embeddings.length} samples`, 'dim');
+}
+
+async function trainSession() {
+  const total = classes.reduce((s,c)=>s+c.embeddings.length,0);
+  if (total < classes.length * 3) { log('[ERR] Need at least 3 samples per class','err'); return; }
+
+  const epochs = parseInt(document.getElementById('p-epochs').value);
+  const lr = parseInt(document.getElementById('p-lr').value) * 0.0001;
+  const batchSize = parseInt(document.getElementById('p-batch').value);
+  const denseUnits = parseInt(document.getElementById('p-dense').value);
+  const N = classes.length;
+
+  // Build dataset with val split
+  let trainEmbs = [], trainLabels = [], valEmbs = [], valLabels = [];
+  classes.forEach((cls, ci) => {
+    const embs = cls.embeddings;
+    const nVal = Math.max(1, Math.round(embs.length * 0.2));
+    const idx = Array.from({length:embs.length},(_,i)=>i).sort(()=>Math.random()-0.5);
+    idx.forEach((origIdx, pos) => {
+      if (pos < nVal) { valEmbs.push(embs[origIdx]); valLabels.push(ci); }
+      else { trainEmbs.push(embs[origIdx]); trainLabels.push(ci); }
+    });
+  });
+
+  const trainXs = tf.concat(trainEmbs, 0);
+  const trainYs = tf.oneHot(tf.tensor1d(trainLabels,'int32'), N);
+  const valXs = tf.concat(valEmbs, 0);
+  const valYs = tf.oneHot(tf.tensor1d(valLabels,'int32'), N);
+  const inputShape = trainXs.shape[1];
+
+  if (classifier) classifier.dispose();
+  classifier = tf.sequential({
+    layers: [
+      tf.layers.dense({ inputShape:[inputShape], units:denseUnits, activation:'relu', kernelInitializer:'varianceScaling' }),
+      tf.layers.dropout({ rate: 0.3 }),
+      tf.layers.dense({ units:N, activation:'softmax', kernelInitializer:'varianceScaling' })
+    ]
+  });
+  classifier.compile({ optimizer: tf.train.adam(lr), loss:'categoricalCrossentropy', metrics:['accuracy'] });
+
+  const btn = document.getElementById('btn-train');
+  btn.disabled = true; btn.textContent = '⏳ TRAINING...';
+
+  const newClassAdded = classes.some(c => c.isNew);
+  log(`[SESSION ${sessions.length+1}] Classes: ${N}${newClassAdded?' (new class added!)':''}`, 'info');
+  log(`[ARCH] ${inputShape}→${denseUnits}→${N}`, 'dim');
+
+  let lastTrainAcc = 0, lastTrainLoss = 0;
+  await classifier.fit(trainXs, trainYs, {
+    epochs, batchSize, shuffle: true,
+    callbacks: {
+      onEpochEnd: async (epoch, logs) => {
+        const pct = ((epoch+1)/epochs*100).toFixed(0);
+        document.getElementById('prog-fill').style.width = pct+'%';
+        document.getElementById('ep-lbl').textContent = `EP ${epoch+1}/${epochs}`;
+        document.getElementById('loss-lbl').textContent = `L=${logs.loss.toFixed(3)}`;
+        lastTrainAcc = logs.acc; lastTrainLoss = logs.loss;
+      }
+    }
+  });
+
+  const valResult = classifier.evaluate(valXs, valYs, {batchSize:32});
+  const [valLoss, valAcc] = await Promise.all([valResult[0].data(), valResult[1].data()]);
+
+  btn.disabled = false; btn.textContent = '⚡ TRAIN SESSION';
+
+  // Mark all classes as not new
+  classes.forEach(c => c.isNew = false);
+  buildClassRows();
+
+  const session = {
+    id: sessions.length + 1,
+    numClasses: N,
+    classNames: classes.map(c=>c.name),
+    trainAcc: lastTrainAcc,
+    valAcc: valAcc[0],
+    trainLoss: lastTrainLoss,
+    valLoss: valLoss[0],
+    newClassAdded
+  };
+  sessions.push(session);
+  log(`[RESULT] Train: ${(lastTrainAcc*100).toFixed(1)}% · Val: ${(valAcc[0]*100).toFixed(1)}%`, 'info');
+
+  [trainXs, trainYs, valXs, valYs].forEach(t=>t.dispose());
+  valResult.forEach(t=>t.dispose());
+
+  document.getElementById('btn-predict').disabled = false;
+  updateInsights();
+  drawAccChart();
+  renderSessionsTable();
+  renderAnalysis();
+}
+
+function updateInsights() {
+  document.getElementById('ins-sessions').textContent = sessions.length;
+  document.getElementById('ins-session-sub').textContent = `${sessions[sessions.length-1].numClasses} classes in last session`;
+
+  const best = sessions.reduce((a,b)=>b.valAcc>a.valAcc?b:a);
+  document.getElementById('ins-best').textContent = (best.valAcc*100).toFixed(1)+'%';
+  document.getElementById('ins-best-sub').textContent = `Session ${best.id} · ${best.numClasses} classes`;
+
+  if (sessions.length >= 2) {
+    const last2 = sessions.slice(-2);
+    const delta = (last2[1].valAcc - last2[0].valAcc) * 100;
+    const ins = document.getElementById('ins-trend');
+    const sub = document.getElementById('ins-trend-sub');
+    ins.textContent = (delta >= 0 ? '▲ +' : '▼ ') + Math.abs(delta).toFixed(1) + '%';
+    ins.style.color = delta >= 0 ? 'var(--accent)' : 'var(--accent2)';
+    sub.textContent = delta >= 0 ? 'Improving' : 'Degrading — add more data';
+  } else {
+    document.getElementById('ins-trend').textContent = '—';
+    document.getElementById('ins-trend-sub').textContent = 'Run 2+ sessions to track';
+  }
+}
+
+function drawAccChart() {
+  const canvas = document.getElementById('acc-chart');
+  const W = canvas.offsetWidth || 600;
+  const H = 220;
+  canvas.width = W * window.devicePixelRatio || W;
+  canvas.height = H * window.devicePixelRatio || H;
+  canvas.style.width = W+'px';
+  canvas.style.height = H+'px';
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  ctx.scale(dpr, dpr);
+
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  if (sessions.length === 0) return;
+
+  const padL = 50, padR = 20, padT = 20, padB = 30;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+
+  // Grid
+  ctx.strokeStyle = '#1a3020';
+  ctx.lineWidth = 1;
+  [0,0.25,0.5,0.75,1].forEach(v => {
+    const y = padT + chartH * (1 - v);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W-padR, y); ctx.stroke();
+    ctx.fillStyle = '#3a5040';
+    ctx.font = '10px Share Tech Mono, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText((v*100).toFixed(0)+'%', padL-6, y+4);
+  });
+
+  const N = sessions.length;
+  const xPos = i => padL + (N === 1 ? chartW/2 : i / (N-1) * chartW);
+  const yPos = v => padT + chartH * (1 - v);
+
+  // Mark where new classes were added
+  sessions.forEach((s, i) => {
+    if (s.newClassAdded) {
+      const x = xPos(i);
+      ctx.strokeStyle = 'rgba(0,204,255,0.3)';
+      ctx.setLineDash([4,4]);
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H-padB); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  });
+
+  // Train acc line
+  ctx.strokeStyle = '#00ff88';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  sessions.forEach((s, i) => {
+    const x = xPos(i), y = yPos(s.trainAcc);
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  // Val acc line
+  ctx.strokeStyle = '#ff9500';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  sessions.forEach((s, i) => {
+    const x = xPos(i), y = yPos(s.valAcc);
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  // Points + new class markers
+  sessions.forEach((s, i) => {
+    const x = xPos(i);
+
+    // Train point
+    ctx.fillStyle = '#00ff88';
+    ctx.beginPath(); ctx.arc(x, yPos(s.trainAcc), 4, 0, Math.PI*2); ctx.fill();
+
+    // Val point
+    ctx.fillStyle = '#ff9500';
+    ctx.beginPath(); ctx.arc(x, yPos(s.valAcc), 4, 0, Math.PI*2); ctx.fill();
+
+    // New class circle
+    if (s.newClassAdded) {
+      ctx.fillStyle = '#00ccff';
+      ctx.beginPath(); ctx.arc(x, padT + 10, 6, 0, Math.PI*2); ctx.fill();
+    }
+
+    // X axis label
+    ctx.fillStyle = '#3a5040';
+    ctx.font = '9px Share Tech Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`S${s.id}(${s.numClasses}C)`, x, H-padB+16);
+  });
+}
+
+function renderSessionsTable() {
+  if (sessions.length === 0) return;
+  let html = `<table class="sessions-table">
+    <tr><th>#</th><th>Classes</th><th>Train Acc</th><th>Val Acc</th><th>Δ Val</th><th>Status</th></tr>`;
+  sessions.forEach((s, i) => {
+    const prev = i > 0 ? sessions[i-1] : null;
+    const delta = prev ? (s.valAcc - prev.valAcc) * 100 : null;
+    const deltaHtml = delta !== null
+      ? `<span class="delta ${delta>=0?'up':'down'}">${delta>=0?'▲':'▼'} ${Math.abs(delta).toFixed(1)}%</span>`
+      : '—';
+
+    let badge = '';
+    if (s.newClassAdded) badge = '<span class="badge new">+CLASS</span>';
+    else if (s.valAcc >= 0.9) badge = '<span class="badge good">GOOD</span>';
+    else if (s.valAcc < 0.6) badge = '<span class="badge warn">WEAK</span>';
+
+    html += `<tr>
+      <td style="color:var(--accent)">S${s.id}</td>
+      <td style="color:var(--accent3)">${s.numClasses}</td>
+      <td style="color:var(--accent)">${(s.trainAcc*100).toFixed(1)}%</td>
+      <td style="color:var(--accent2)">${(s.valAcc*100).toFixed(1)}%</td>
+      <td>${deltaHtml}</td>
+      <td>${badge}</td>
+    </tr>`;
+  });
+  html += '</table>';
+  document.getElementById('sessions-table-wrap').innerHTML = html;
+}
+
+function renderAnalysis() {
+  const box = document.getElementById('analysis-box');
+  if (sessions.length < 2) {
+    box.innerHTML = `<p style="font-size:12px;color:var(--dim);font-family:'Share Tech Mono',monospace;">Run 2+ sessions for analysis</p>`;
+    return;
+  }
+
+  const insights = [];
+  const last = sessions[sessions.length-1];
+  const first = sessions[0];
+
+  // Overfitting check
+  const overfit = sessions.map(s => s.trainAcc - s.valAcc);
+  const avgOverfit = overfit.reduce((a,b)=>a+b,0) / overfit.length;
+  if (avgOverfit > 0.15) {
+    insights.push({ type:'warn', text:`Avg train-val gap: ${(avgOverfit*100).toFixed(1)}% — consider more data or stronger dropout` });
+  } else {
+    insights.push({ type:'ok', text:`Train-val gap is healthy: ${(avgOverfit*100).toFixed(1)}% avg — good generalization` });
+  }
+
+  // After new class addition
+  const newClassSessions = sessions.filter(s => s.newClassAdded);
+  newClassSessions.forEach(s => {
+    const idx = sessions.indexOf(s);
+    if (idx > 0) {
+      const before = sessions[idx-1];
+      const drop = (before.valAcc - s.valAcc)*100;
+      if (drop > 5) {
+        insights.push({ type:'warn', text:`Adding class "${s.classNames[s.numClasses-1]}" dropped val acc by ${drop.toFixed(1)}% — capture more samples` });
+      } else if (drop > 0) {
+        insights.push({ type:'info', text:`Minor drop (${drop.toFixed(1)}%) after adding class ${s.numClasses} — within acceptable range` });
+      } else {
+        insights.push({ type:'ok', text:`Adding class ${s.numClasses} maintained or improved accuracy — well-distributed data!` });
+      }
+    }
+  });
+
+  // Overall trend
+  if (sessions.length >= 3) {
+    const recent3 = sessions.slice(-3);
+    const trend = (recent3[2].valAcc - recent3[0].valAcc) * 100;
+    if (trend > 2) insights.push({ type:'ok', text:`Upward trend over last 3 sessions: +${trend.toFixed(1)}%` });
+    else if (trend < -2) insights.push({ type:'warn', text:`Declining trend over last 3 sessions: ${trend.toFixed(1)}% — add more diverse samples` });
+  }
+
+  // Sample counts
+  const minSamples = Math.min(...classes.map(c=>c.embeddings.length));
+  if (minSamples < 10) {
+    insights.push({ type:'info', text:`Min samples per class: ${minSamples} — aim for 15+ per class for reliable results` });
+  }
+
+  // Catastrophic forgetting hint
+  if (newClassSessions.length > 0 && sessions.length > 2) {
+    insights.push({ type:'info', text:`Full retraining used — all original class samples retained to prevent catastrophic forgetting` });
+  }
+
+  const colors = { ok:'var(--accent)', warn:'var(--accent2)', info:'var(--accent3)' };
+  const icons = { ok:'✓', warn:'⚠', info:'ℹ' };
+
+  box.innerHTML = insights.map(ins => `
+    <div style="border:1px solid var(--border);padding:12px;margin-bottom:10px;border-left:2px solid ${colors[ins.type]}">
+      <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:${colors[ins.type]};margin-bottom:4px;">
+        ${icons[ins.type]} ${ins.type.toUpperCase()}
+      </div>
+      <div style="font-size:13px;color:var(--text);line-height:1.5;">${ins.text}</div>
+    </div>
+  `).join('');
+}
+
+// Live prediction
+function updatePredBars(probs) {
+  const box = document.getElementById('pred-box');
+  box.innerHTML = '';
+  classes.forEach((cls, i) => {
+    const pct = probs ? (probs[i]*100).toFixed(1) : '0.0';
+    const color = getColor(i);
+    box.innerHTML += `
+    <div class="pred-row">
+      <div class="pred-name" style="color:${color}">${cls.name}</div>
+      <div class="pred-track"><div class="pred-fill" style="width:${pct}%;background:${color}"></div></div>
+      <div class="pred-pct" style="color:${color}">${pct}%</div>
+    </div>`;
+  });
+}
+
+function togglePredict() {
+  if (!classifier) { log('[WARN] Train first','err'); return; }
+  if (!predicting) {
+    predicting = true;
+    predInterval = setInterval(async () => {
+      const vid = document.getElementById('webcam');
+      if (!vid.srcObject) return;
+      const emb = extractEmb(vid);
+      const pred = tf.tidy(() => classifier.predict(emb));
+      const probs = Array.from(await pred.data());
+      pred.dispose(); emb.dispose();
+      updatePredBars(probs);
+    }, 150);
+    log('[PRED] Live prediction active','info');
+  } else {
+    predicting = false;
+    clearInterval(predInterval);
+    log('[PRED] Stopped','dim');
+  }
+}
+
+function resetHistory() {
+  sessions = [];
+  document.getElementById('sessions-table-wrap').innerHTML = '<p style="font-size:12px;color:var(--dim);font-family:\'Share Tech Mono\',monospace;">No sessions recorded yet</p>';
+  document.getElementById('analysis-box').innerHTML = '<p style="font-size:12px;color:var(--dim);font-family:\'Share Tech Mono\',monospace;">Run training sessions to analyze</p>';
+  const canvas = document.getElementById('acc-chart');
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  document.getElementById('ins-sessions').textContent = '0';
+  document.getElementById('ins-best').textContent = '—';
+  document.getElementById('ins-trend').textContent = '—';
+  log('[RESET] Session history cleared','err');
+}
+
+document.getElementById('btn-cam').addEventListener('click', startCamera);
+document.getElementById('btn-add-class').addEventListener('click', addNewClass);
+document.getElementById('btn-train').addEventListener('click', trainSession);
+document.getElementById('btn-predict').addEventListener('click', togglePredict);
+document.getElementById('btn-reset-history').addEventListener('click', resetHistory);
+
+// Initial chart placeholder
+window.addEventListener('load', () => {
+  const canvas = document.getElementById('acc-chart');
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth; canvas.height = 220;
+  ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#1a3020';
+  ctx.font = '12px Share Tech Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('— ACCURACY HISTORY WILL APPEAR HERE AFTER TRAINING —', canvas.width/2, 110);
+});
+
+loadMobileNet().then(() => log('[READY] Start camera, capture samples, train!','info'));
+</script>
+</body>
+</html>

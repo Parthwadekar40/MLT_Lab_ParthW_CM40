@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NeuralLens — Transfer Learning Studio</title>
+
+<!-- TensorFlow.js -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<!-- TensorFlow.js Vis -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-vis@1.5.1/dist/tfjs-vis.umd.min.js"></script>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --bg:       #0a0b0f;
+    --surface:  #111218;
+    --card:     #16181f;
+    --border:   #1f2130;
+    --accent:   #4f6ef7;
+    --accent2:  #7c3aed;
+    --green:    #22c55e;
+    --amber:    #f59e0b;
+    --red:      #ef4444;
+    --text:     #e2e8f0;
+    --muted:    #6b7280;
+    --mono:     'Space Mono', monospace;
+    --sans:     'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Noise texture overlay ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    pointer-events: none;
+  }
+
+  .app-shell {
+    position: relative; z-index: 1;
+    display: grid;
+    grid-template-columns: 300px 1fr 300px;
+    grid-template-rows: 64px 1fr;
+    gap: 0;
+    height: 100vh;
+  }
+
+  /* ── Header ── */
+  header {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,11,15,0.9);
+    backdrop-filter: blur(12px);
+  }
+  .logo {
+    font-family: var(--mono);
+    font-size: 1.1rem;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+  .logo span { color: var(--accent); }
+  .header-badge {
+    font-family: var(--mono);
+    font-size: 0.6rem;
+    padding: 3px 8px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 2px;
+    letter-spacing: 0.1em;
+  }
+  .status-pill {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 0.78rem;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.4s, box-shadow 0.4s;
+  }
+  .status-dot.loading { background: var(--amber); box-shadow: 0 0 8px var(--amber); animation: pulse 1.2s infinite; }
+  .status-dot.ready   { background: var(--green);  box-shadow: 0 0 8px var(--green); }
+  .status-dot.training{ background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 0.8s infinite; }
+  .status-dot.predicting{ background: #a855f7;     box-shadow: 0 0 8px #a855f7; animation: pulse 1s infinite; }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* ── Panels ── */
+  .panel {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 20px 16px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .panel.right { border-right: none; border-left: 1px solid var(--border); }
+
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .card-label {
+    font-size: 0.7rem;
+    font-family: var(--mono);
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+
+  /* ── Class inputs ── */
+  .class-input-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+  }
+  .class-input-row input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    padding: 7px 10px;
+    border-radius: 6px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .class-input-row input:focus { border-color: var(--accent); }
+  .class-input-row input::placeholder { color: var(--muted); }
+
+  .sample-count {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--muted);
+    min-width: 28px;
+    text-align: right;
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 8px 14px;
+    border: none; border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.04em;
+  }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .btn-capture {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff;
+    width: 100%;
+    padding: 10px;
+  }
+  .btn-capture:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(79,110,247,0.35); }
+  .btn-capture:active:not(:disabled) { transform: translateY(0); }
+
+  .btn-train {
+    background: var(--green);
+    color: #000;
+    width: 100%;
+    padding: 10px;
+  }
+  .btn-train:hover:not(:disabled) { background: #16a34a; box-shadow: 0 4px 16px rgba(34,197,94,0.3); }
+
+  .btn-predict {
+    background: #7c3aed;
+    color: #fff;
+    width: 100%;
+    padding: 10px;
+  }
+  .btn-predict:hover:not(:disabled) { background: #6d28d9; box-shadow: 0 4px 16px rgba(124,58,237,0.3); }
+
+  .btn-stop {
+    background: var(--red);
+    color: #fff;
+    width: 100%;
+    padding: 10px;
+  }
+
+  .btn-sm {
+    padding: 6px 10px;
+    font-size: 0.68rem;
+    background: var(--border);
+    color: var(--text);
+  }
+  .btn-sm:hover { background: #2a2d3e; }
+
+  .btn-add {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--muted);
+    width: 100%;
+    padding: 7px;
+    font-size: 0.72rem;
+  }
+  .btn-add:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Center webcam view ── */
+  .center-panel {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px;
+    padding: 24px;
+    background: var(--bg);
+  }
+
+  .webcam-container {
+    position: relative;
+    width: 100%; max-width: 480px;
+    aspect-ratio: 4/3;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #000;
+    box-shadow: 0 0 60px rgba(79,110,247,0.08);
+  }
+  .webcam-container video,
+  .webcam-container canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
+  #displayCanvas { z-index: 1; }
+
+  .webcam-overlay {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; align-items: flex-end;
+    padding: 12px;
+    background: linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 40%);
+    pointer-events: none;
+  }
+  .webcam-overlay-text {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.6);
+    letter-spacing: 0.08em;
+  }
+
+  /* Corner brackets decoration */
+  .corner { position: absolute; z-index: 3; width: 20px; height: 20px; pointer-events: none; }
+  .corner.tl { top: 8px; left: 8px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+  .corner.tr { top: 8px; right: 8px; border-top: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+  .corner.bl { bottom: 8px; left: 8px; border-bottom: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+  .corner.br { bottom: 8px; right: 8px; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+
+  /* ── Hold-to-capture ring ── */
+  .capture-ring {
+    position: absolute; inset: 0; z-index: 4;
+    border-radius: 12px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    box-shadow: inset 0 0 0 3px var(--accent);
+  }
+  .capture-ring.active { opacity: 1; }
+
+  /* ── Training stats ── */
+  .stat-row {
+    display: flex; justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: var(--muted); }
+  .stat-val { color: var(--text); }
+
+  /* ── Progress bar ── */
+  .progress-bar-wrap {
+    background: var(--bg);
+    border-radius: 4px;
+    height: 6px;
+    overflow: hidden;
+    margin-top: 8px;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width 0.3s;
+  }
+
+  /* ── Confidence bars ── */
+  .conf-class {
+    margin-bottom: 14px;
+  }
+  .conf-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 5px;
+  }
+  .conf-name {
+    font-size: 0.8rem;
+    font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 170px;
+  }
+  .conf-pct {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .conf-bar-bg {
+    background: var(--bg);
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
+  }
+  .conf-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.25s ease, background 0.3s;
+    min-width: 0;
+  }
+
+  /* ── Epoch progress ── */
+  #epochLabel {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-align: right;
+    margin-top: 4px;
+  }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* ── tfjs-vis visor override ── */
+  .visor { font-family: var(--mono) !important; }
+
+  /* ── Webcam error ── */
+  .webcam-error {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px;
+    height: 100%;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    text-align: center;
+    padding: 20px;
+  }
+
+  .model-info {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  /* delete class btn */
+  .del-btn {
+    background: none; border: none;
+    color: var(--muted); cursor: pointer;
+    font-size: 0.9rem; line-height: 1;
+    padding: 0 2px;
+    transition: color 0.2s;
+  }
+  .del-btn:hover { color: var(--red); }
+
+  /* highlight active capture row */
+  .class-row-active .class-input-row input { border-color: var(--accent); }
+
+  /* spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- ═══ HEADER ═══ -->
+  <header>
+    <div class="logo">Neural<span>Lens</span></div>
+    <div class="header-badge">TRANSFER LEARNING STUDIO</div>
+    <div style="flex:1"></div>
+    <div class="model-info">
+      MobileNetV3 · TF.js 4.20 &nbsp;|&nbsp; WebGL
+    </div>
+    <div class="status-pill" style="margin-left:16px;">
+      <div class="status-dot loading" id="statusDot"></div>
+      <span id="statusText">Initializing…</span>
+    </div>
+  </header>
+
+  <!-- ═══ LEFT PANEL — Control Center ═══ -->
+  <aside class="panel">
+    <div class="panel-title">// Control Center</div>
+
+    <!-- Classes -->
+    <div class="card">
+      <div class="card-label">TRAINING CLASSES</div>
+      <div id="classesContainer"></div>
+      <button class="btn btn-add" id="addClassBtn" onclick="addClassRow()">+ ADD CLASS</button>
+    </div>
+
+    <!-- Capture -->
+    <div class="card">
+      <div class="card-label">DATA COLLECTION</div>
+      <div style="margin-bottom:10px;">
+        <label style="font-size:0.72rem;color:var(--muted);font-family:var(--mono);">ACTIVE CLASS</label>
+        <select id="activeCaptureClass" style="
+          width:100%; margin-top:4px;
+          background:var(--bg); border:1px solid var(--border);
+          color:var(--text); font-family:var(--mono); font-size:0.78rem;
+          padding:7px 10px; border-radius:6px; outline:none;
+        "></select>
+      </div>
+      <button class="btn btn-capture" id="captureBtn"
+        onmousedown="startCapture()" onmouseup="stopCapture()"
+        ontouchstart="startCapture()" ontouchend="stopCapture()">
+        ◉ &nbsp;HOLD TO CAPTURE
+      </button>
+      <div id="captureRing" class="capture-ring"></div>
+    </div>
+
+    <!-- Params -->
+    <div class="card">
+      <div class="card-label">HYPERPARAMETERS</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+        <div>
+          <label style="font-size:0.65rem;color:var(--muted);font-family:var(--mono);">LR</label>
+          <input type="number" id="lr" value="0.0001" step="0.00001" style="width:100%;margin-top:3px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.75rem;padding:5px 8px;border-radius:5px;outline:none;" />
+        </div>
+        <div>
+          <label style="font-size:0.65rem;color:var(--muted);font-family:var(--mono);">BATCH</label>
+          <input type="number" id="batchSize" value="20" min="4" max="64" style="width:100%;margin-top:3px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.75rem;padding:5px 8px;border-radius:5px;outline:none;" />
+        </div>
+      </div>
+      <div>
+        <label style="font-size:0.65rem;color:var(--muted);font-family:var(--mono);">EPOCHS</label>
+        <input type="number" id="epochs" value="30" min="5" max="100" style="width:100%;margin-top:3px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.75rem;padding:5px 8px;border-radius:5px;outline:none;" />
+      </div>
+    </div>
+
+    <!-- Train -->
+    <div class="card">
+      <div class="card-label">PIPELINE</div>
+      <button class="btn btn-train" id="trainBtn" onclick="startTraining()" disabled>▶ &nbsp;TRAIN MODEL</button>
+      <div style="height:8px;"></div>
+      <button class="btn btn-predict" id="predictBtn" onclick="togglePredict()" disabled>◈ &nbsp;START PREDICTING</button>
+      <div style="height:8px;"></div>
+      <button class="btn btn-sm" id="downloadBtn" onclick="downloadModel()" disabled style="width:100%;">⬇ &nbsp;DOWNLOAD WEIGHTS</button>
+    </div>
+
+    <!-- Training stats -->
+    <div class="card" id="statsCard" style="display:none;">
+      <div class="card-label">TRAINING STATS</div>
+      <div class="stat-row"><span class="stat-label">Epoch</span><span class="stat-val" id="statEpoch">—</span></div>
+      <div class="stat-row"><span class="stat-label">Loss</span><span class="stat-val" id="statLoss">—</span></div>
+      <div class="stat-row"><span class="stat-label">Accuracy</span><span class="stat-val" id="statAcc">—</span></div>
+      <div class="stat-row"><span class="stat-label">Samples</span><span class="stat-val" id="statSamples">—</span></div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="epochBar" style="width:0%"></div>
+      </div>
+      <div id="epochLabel">0 / 0</div>
+    </div>
+  </aside>
+
+  <!-- ═══ CENTER — Webcam ═══ -->
+  <main class="center-panel">
+    <div class="webcam-container" id="webcamContainer">
+      <video id="webcam" autoplay playsinline muted></video>
+      <canvas id="displayCanvas"></canvas>
+      <div class="webcam-overlay">
+        <span class="webcam-overlay-text" id="webcamOverlayText">AWAITING WEBCAM…</span>
+      </div>
+      <div class="corner tl"></div><div class="corner tr"></div>
+      <div class="corner bl"></div><div class="corner br"></div>
+      <div class="capture-ring" id="captureRingOverlay"></div>
+    </div>
+
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-sm" onclick="resetAll()" id="resetBtn">↺ &nbsp;RESET ALL</button>
+      <button class="btn btn-sm" id="visorBtn" onclick="toggleVisor()">📈 &nbsp;TRAINING CHARTS</button>
+    </div>
+
+    <!-- Tensor memory -->
+    <div style="font-family:var(--mono);font-size:0.62rem;color:var(--muted);" id="memInfo">
+      Tensors: 0 &nbsp;|&nbsp; GPU Mem: —
+    </div>
+  </main>
+
+  <!-- ═══ RIGHT PANEL — Predictions ═══ -->
+  <aside class="panel right">
+    <div class="panel-title">// Prediction Results</div>
+
+    <div class="card">
+      <div class="card-label">CONFIDENCE SCORES</div>
+      <div id="confidenceBars">
+        <div style="color:var(--muted);font-size:0.75rem;font-family:var(--mono);text-align:center;padding:20px 0;">
+          Train model to see predictions
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">TOP PREDICTION</div>
+      <div id="topPred" style="font-family:var(--mono);font-size:1.4rem;color:var(--accent);text-align:center;padding:10px 0;">—</div>
+      <div id="topConf" style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);text-align:center;">—</div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">DATASET OVERVIEW</div>
+      <div id="datasetOverview" style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);">
+        No data collected yet.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">MEMORY MONITOR</div>
+      <div id="memDetails" style="font-family:var(--mono);font-size:0.68rem;color:var(--muted);line-height:1.8;">
+        Tensors: —<br/>GPU Allocated: —<br/>GPU Free: —
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     JAVASCRIPT — Full ML Pipeline
+═══════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+/* ─────────────────────────────────────────
+   GLOBALS
+───────────────────────────────────────── */
+const MOBILENET_URL =
+  'https://tfhub.dev/google/tfjs-model/imagenet/mobilenet_v3_large_100_224/feature_vector/5/default/1';
+const IMAGE_SIZE = 224;
+
+let mobilenet = null;   // Feature extractor (frozen)
+let headModel = null;   // Custom trainable head
+let isPredicting = false;
+let isTraining   = false;
+let captureInterval = null;
+
+// Per-class activation buffers: { label: string, tensors: tf.Tensor[] }
+let classData = [];
+// DOM rows
+let classRows = [];
+// Class color palette
+const COLORS = ['#4f6ef7','#22c55e','#f59e0b','#ef4444','#a855f7','#06b6d4','#ec4899','#10b981'];
+
+let predRAF = null; // requestAnimationFrame handle
+
+/* ─────────────────────────────────────────
+   STATUS
+───────────────────────────────────────── */
+function setStatus(state, text) {
+  const dot  = document.getElementById('statusDot');
+  const span = document.getElementById('statusText');
+  dot.className = 'status-dot ' + state;
+  span.textContent = text;
+}
+
+/* ─────────────────────────────────────────
+   MEMORY MONITOR
+───────────────────────────────────────── */
+function updateMemInfo() {
+  const mem = tf.memory();
+  const tensors = mem.numTensors;
+  const bytes   = mem.numBytes;
+  const mb      = (bytes / 1024 / 1024).toFixed(1);
+  document.getElementById('memInfo').textContent =
+    `Tensors: ${tensors}  |  Mem: ${mb} MB`;
+  document.getElementById('memDetails').innerHTML =
+    `Tensors: ${tensors}<br/>Allocated: ${mb} MB<br/>Backends: ${tf.getBackend()}`;
+}
+setInterval(updateMemInfo, 1500);
+
+/* ─────────────────────────────────────────
+   WEBCAM
+───────────────────────────────────────── */
+async function initWebcam() {
+  const video = document.getElementById('webcam');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+      audio: false
+    });
+    video.srcObject = stream;
+    return new Promise(resolve => {
+      video.onloadedmetadata = () => {
+        video.play();
+        // Size the overlay canvas
+        const canvas = document.getElementById('displayCanvas');
+        canvas.width  = video.videoWidth;
+        canvas.height = video.videoHeight;
+        document.getElementById('webcamOverlayText').textContent = 'LIVE';
+        resolve(true);
+      };
+    });
+  } catch (err) {
+    console.error('Webcam error:', err);
+    const container = document.getElementById('webcamContainer');
+    container.innerHTML = `
+      <div class="webcam-error">
+        <div style="font-size:2rem;">📷</div>
+        <div>WEBCAM ACCESS DENIED</div>
+        <div style="opacity:0.6;font-size:0.65rem;">${err.message}</div>
+        <div style="opacity:0.5;font-size:0.62rem;margin-top:4px;">Grant camera permission and reload.</div>
+      </div>`;
+    return false;
+  }
+}
+
+/* ─────────────────────────────────────────
+   MODEL LOADING
+───────────────────────────────────────── */
+async function loadMobileNet() {
+  setStatus('loading', 'Loading MobileNetV3…');
+  try {
+    // Load via tfhub as a GraphModel (headless feature extractor)
+    mobilenet = await tf.loadGraphModel(MOBILENET_URL, { fromTFHub: true });
+
+    // Warm-up pass
+    tf.tidy(() => {
+      const dummy = tf.zeros([1, IMAGE_SIZE, IMAGE_SIZE, 3]);
+      mobilenet.predict(dummy);
+    });
+    setStatus('ready', 'Ready — Add Classes');
+    document.getElementById('webcamOverlayText').textContent = 'READY';
+    console.log('✓ MobileNetV3 loaded');
+  } catch (err) {
+    console.error('Model load failed:', err);
+    setStatus('loading', 'Load Failed — Retrying…');
+    // Fallback: use MobileNet from tfjs-models CDN
+    await loadMobileNetFallback();
+  }
+}
+
+async function loadMobileNetFallback() {
+  // Dynamically load @tensorflow-models/mobilenet as fallback
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js';
+  document.head.appendChild(script);
+  await new Promise(r => { script.onload = r; });
+
+  const mn = await mobilenet_module.load({ version: 2, alpha: 1.0 });
+  // Wrap to expose same .predict() API returning feature vector
+  mobilenet = {
+    predict: (input) => {
+      return tf.tidy(() => {
+        const activation = mn.infer(input, 'global_average_pooling2d_1');
+        return activation;
+      });
+    },
+    _isFallback: true
+  };
+  setStatus('ready', 'Ready (Fallback Model)');
+  console.log('✓ MobileNet fallback loaded');
+}
+
+/* ─────────────────────────────────────────
+   CLASS MANAGEMENT
+───────────────────────────────────────── */
+function addClassRow(name = '') {
+  const idx = classRows.length;
+  const color = COLORS[idx % COLORS.length];
+
+  // Data slot
+  classData.push({ label: name || `Class ${idx + 1}`, tensors: [], color });
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'class-row';
+  wrapper.dataset.idx = idx;
+  wrapper.innerHTML = `
+    <div class="class-input-row">
+      <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></div>
+      <input type="text" placeholder="Class name…" value="${classData[idx].label}"
+        oninput="classData[${idx}].label = this.value; syncSelectAndBars()" />
+      <span class="sample-count" id="count-${idx}">0</span>
+      <button class="del-btn" onclick="deleteClass(${idx})" title="Remove">×</button>
+    </div>
+    <button class="btn btn-capture"
+      style="margin-bottom:10px;font-size:0.68rem;padding:7px;"
+      onmousedown="startCaptureForClass(${idx})"
+      onmouseup="stopCapture()"
+      ontouchstart="startCaptureForClass(${idx})"
+      ontouchend="stopCapture()">
+      ◉ HOLD TO CAPTURE
+    </button>
+  `;
+  document.getElementById('classesContainer').appendChild(wrapper);
+  classRows.push(wrapper);
+
+  syncSelectAndBars();
+  checkTrainReady();
+}
+
+function deleteClass(idx) {
+  // Dispose stored tensors
+  if (classData[idx] && classData[idx].tensors) {
+    classData[idx].tensors.forEach(t => t.dispose());
+  }
+  classData.splice(idx, 1);
+  classRows.splice(idx, 1);
+  // Re-render
+  document.getElementById('classesContainer').innerHTML = '';
+  classRows = [];
+  const saved = [...classData];
+  classData = [];
+  saved.forEach(c => {
+    addClassRow(c.label);
+    // re-attach tensors
+    classData[classData.length - 1].tensors = c.tensors;
+    document.getElementById(`count-${classData.length - 1}`).textContent = c.tensors.length;
+  });
+  syncSelectAndBars();
+  checkTrainReady();
+}
+
+function syncSelectAndBars() {
+  // Sync select dropdown
+  const sel = document.getElementById('activeCaptureClass');
+  const prev = sel.value;
+  sel.innerHTML = '';
+  classData.forEach((c, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = c.label || `Class ${i+1}`;
+    sel.appendChild(opt);
+  });
+  sel.value = prev;
+  updateDatasetOverview();
+}
+
+function updateDatasetOverview() {
+  const el = document.getElementById('datasetOverview');
+  if (classData.length === 0) { el.textContent = 'No data collected yet.'; return; }
+  el.innerHTML = classData.map((c,i) =>
+    `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border);">
+       <span style="color:${c.color}">● ${c.label||`Class ${i+1}`}</span>
+       <span>${c.tensors.length} samples</span>
+     </div>`
+  ).join('');
+}
+
+function checkTrainReady() {
+  const hasData = classData.length >= 2 && classData.every(c => c.tensors.length > 0);
+  document.getElementById('trainBtn').disabled = !hasData || isTraining;
+}
+
+/* ─────────────────────────────────────────
+   CAPTURE ENGINE
+───────────────────────────────────────── */
+function startCaptureForClass(idx) {
+  document.getElementById('activeCaptureClass').value = idx;
+  startCapture();
+}
+
+function startCapture() {
+  if (!mobilenet) { alert('Model not loaded yet.'); return; }
+  const ring = document.getElementById('captureRingOverlay');
+  ring.classList.add('active');
+
+  captureInterval = setInterval(() => {
+    const idx = parseInt(document.getElementById('activeCaptureClass').value);
+    if (isNaN(idx) || idx < 0 || idx >= classData.length) return;
+
+    const activation = tf.tidy(() => {
+      const video = document.getElementById('webcam');
+      // Preprocess: resize to 224×224, normalize
+      let img = tf.browser.fromPixels(video);
+      img = tf.image.resizeBilinear(img, [IMAGE_SIZE, IMAGE_SIZE]);
+      img = img.toFloat().div(255.0);
+      img = img.expandDims(0);  // [1,224,224,3]
+
+      // Feature extraction
+      let features;
+      if (mobilenet._isFallback) {
+        features = mobilenet.predict(img);
+      } else {
+        features = mobilenet.predict(img);
+      }
+      // Make sure it's [1, N] (squeeze spatial dims if needed)
+      if (features.rank === 4) {
+        features = features.squeeze([1, 2]);  // GAP
+      }
+      return features.squeeze([0]); // [N]
+    });
+
+    classData[idx].tensors.push(activation);
+    const countEl = document.getElementById(`count-${idx}`);
+    if (countEl) countEl.textContent = classData[idx].tensors.length;
+
+    updateDatasetOverview();
+    checkTrainReady();
+  }, 100); // 10 fps capture
+}
+
+function stopCapture() {
+  if (captureInterval) { clearInterval(captureInterval); captureInterval = null; }
+  document.getElementById('captureRingOverlay').classList.remove('active');
+}
+
+/* ─────────────────────────────────────────
+   AUGMENTATION LITE
+   Randomly flip or shift feature vectors
+───────────────────────────────────────── */
+function augment(tensor) {
+  return tf.tidy(() => {
+    // Randomly add small Gaussian noise to feature vector
+    const noise = tf.randomNormal(tensor.shape, 0, 0.02);
+    // Randomly zero out features (dropout-style augmentation)
+    const mask = tf.greater(tf.randomUniform(tensor.shape), 0.1).cast('float32');
+    return tensor.add(noise).mul(mask);
+  });
+}
+
+/* ─────────────────────────────────────────
+   BUILD HEAD MODEL
+───────────────────────────────────────── */
+function buildHead(featureDim, numClasses) {
+  const model = tf.sequential({
+    layers: [
+      tf.layers.dense({ inputShape: [featureDim], units: 128, activation: 'relu',
+        kernelInitializer: 'glorotUniform' }),
+      tf.layers.dropout({ rate: 0.2 }),
+      tf.layers.dense({ units: numClasses, activation: 'softmax' })
+    ]
+  });
+  return model;
+}
+
+/* ─────────────────────────────────────────
+   TRAINING PIPELINE
+───────────────────────────────────────── */
+async function startTraining() {
+  if (isTraining) return;
+  isTraining = true;
+  isPredicting = false;
+
+  const numClasses = classData.length;
+  const lr         = parseFloat(document.getElementById('lr').value)       || 0.0001;
+  const batchSize  = parseInt(document.getElementById('batchSize').value)  || 20;
+  const numEpochs  = parseInt(document.getElementById('epochs').value)     || 30;
+
+  setStatus('training', 'Learning…');
+  document.getElementById('statsCard').style.display = 'block';
+  document.getElementById('trainBtn').disabled  = true;
+  document.getElementById('predictBtn').disabled = true;
+
+  // ── Build dataset ──
+  const xs = [];
+  const ys = [];
+
+  for (let ci = 0; ci < numClasses; ci++) {
+    classData[ci].tensors.forEach(t => {
+      xs.push(t);
+      ys.push(ci);
+    });
+  }
+
+  if (xs.length === 0) { isTraining = false; return; }
+
+  document.getElementById('statSamples').textContent = xs.length;
+
+  const featureDim = xs[0].shape[0];
+
+  // Dispose old head
+  if (headModel) { headModel.dispose(); headModel = null; }
+  headModel = buildHead(featureDim, numClasses);
+
+  headModel.compile({
+    optimizer: tf.train.adam(lr),
+    loss: 'sparseCategoricalCrossentropy',
+    metrics: ['accuracy']
+  });
+
+  // ── Convert to tensors with augmentation ──
+  const xsTensor = tf.tidy(() => {
+    const augmented = xs.map(t => augment(t));
+    return tf.stack(augmented).cast('float32');
+  });
+  const ysTensor = tf.tensor1d(ys, 'int32');
+
+  // ── tfjs-vis ──
+  const surface = { name: 'Training Metrics', tab: 'Training' };
+
+  const lossHistory = [];
+  const accHistory  = [];
+
+  try {
+    await headModel.fit(xsTensor, ysTensor, {
+      epochs: numEpochs,
+      batchSize: Math.min(batchSize, xs.length),
+      shuffle: true,
+      validationSplit: xs.length >= 20 ? 0.1 : 0,
+      callbacks: {
+        onEpochEnd: async (epoch, logs) => {
+          const loss = logs.loss.toFixed(4);
+          const acc  = (logs.acc * 100).toFixed(1) + '%';
+
+          document.getElementById('statEpoch').textContent = epoch + 1;
+          document.getElementById('statLoss').textContent  = loss;
+          document.getElementById('statAcc').textContent   = acc;
+          document.getElementById('epochBar').style.width  =
+            ((epoch + 1) / numEpochs * 100) + '%';
+          document.getElementById('epochLabel').textContent =
+            `${epoch + 1} / ${numEpochs}`;
+
+          lossHistory.push({ x: epoch, y: logs.loss });
+          accHistory.push({ x: epoch, y: logs.acc });
+
+          // tfjs-vis render
+          if (window.tfvis) {
+            await tfvis.render.linechart(surface,
+              { values: [lossHistory, accHistory], series: ['Loss', 'Accuracy'] },
+              { xLabel: 'Epoch', yLabel: 'Value', width: 360, height: 240 }
+            );
+          }
+
+          await tf.nextFrame();
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Training error:', err);
+  }
+
+  xsTensor.dispose();
+  ysTensor.dispose();
+
+  isTraining = false;
+  setStatus('ready', 'Training Complete');
+  document.getElementById('trainBtn').disabled   = false;
+  document.getElementById('predictBtn').disabled = false;
+  document.getElementById('downloadBtn').disabled = false;
+
+  buildConfidenceBars();
+}
+
+/* ─────────────────────────────────────────
+   CONFIDENCE BARS
+───────────────────────────────────────── */
+function buildConfidenceBars() {
+  const container = document.getElementById('confidenceBars');
+  container.innerHTML = '';
+  classData.forEach((c, i) => {
+    const div = document.createElement('div');
+    div.className = 'conf-class';
+    div.innerHTML = `
+      <div class="conf-header">
+        <span class="conf-name" style="color:${c.color}">${c.label || `Class ${i+1}`}</span>
+        <span class="conf-pct" id="pct-${i}">0%</span>
+      </div>
+      <div class="conf-bar-bg">
+        <div class="conf-bar-fill" id="bar-${i}" style="width:0%;background:${c.color}"></div>
+      </div>`;
+    container.appendChild(div);
+  });
+}
+
+function updateConfidenceBars(probabilities) {
+  probabilities.forEach((p, i) => {
+    const pct = (p * 100).toFixed(1) + '%';
+    const w   = (p * 100).toFixed(2) + '%';
+    const el  = document.getElementById(`pct-${i}`);
+    const bar = document.getElementById(`bar-${i}`);
+    if (el)  el.textContent  = pct;
+    if (bar) bar.style.width = w;
+  });
+
+  // Top prediction
+  const topIdx = probabilities.indexOf(Math.max(...probabilities));
+  document.getElementById('topPred').textContent = classData[topIdx]?.label || `Class ${topIdx}`;
+  document.getElementById('topConf').textContent =
+    (probabilities[topIdx] * 100).toFixed(1) + '% confidence';
+}
+
+/* ─────────────────────────────────────────
+   PREDICTION LOOP
+───────────────────────────────────────── */
+function togglePredict() {
+  if (!headModel) return;
+  isPredicting = !isPredicting;
+  const btn = document.getElementById('predictBtn');
+  if (isPredicting) {
+    setStatus('predicting', 'Predicting…');
+    btn.textContent = '◈  STOP PREDICTING';
+    btn.style.background = '#6b7280';
+    predict();
+  } else {
+    setStatus('ready', 'Ready');
+    btn.textContent = '◈  START PREDICTING';
+    btn.style.background = '';
+    if (predRAF) { cancelAnimationFrame(predRAF); predRAF = null; }
+  }
+}
+
+function predict() {
+  if (!isPredicting || !headModel || !mobilenet) return;
+
+  const probabilities = tf.tidy(() => {
+    const video = document.getElementById('webcam');
+    let img = tf.browser.fromPixels(video);
+    img = tf.image.resizeBilinear(img, [IMAGE_SIZE, IMAGE_SIZE]);
+    img = img.toFloat().div(255.0).expandDims(0);
+
+    let features = mobilenet.predict(img);
+    if (features.rank === 4) features = features.squeeze([1, 2]);
+    if (features.rank === 2) features = features.squeeze([0]);
+    features = features.expandDims(0);
+
+    const output = headModel.predict(features);
+    return Array.from(output.dataSync());
+  });
+
+  updateConfidenceBars(probabilities);
+  predRAF = requestAnimationFrame(predict);
+}
+
+/* ─────────────────────────────────────────
+   DOWNLOAD MODEL
+───────────────────────────────────────── */
+async function downloadModel() {
+  if (!headModel) return;
+  try {
+    await headModel.save('downloads://neurallens-model');
+  } catch (err) {
+    alert('Download failed: ' + err.message);
+  }
+}
+
+/* ─────────────────────────────────────────
+   RESET
+───────────────────────────────────────── */
+function resetAll() {
+  if (isTraining) return;
+  if (!confirm('Reset all collected data and trained weights?')) return;
+
+  // Dispose tensors
+  classData.forEach(c => c.tensors.forEach(t => t.dispose()));
+  classData = [];
+  classRows = [];
+  document.getElementById('classesContainer').innerHTML = '';
+
+  if (headModel) { headModel.dispose(); headModel = null; }
+
+  isPredicting = false;
+  if (predRAF) { cancelAnimationFrame(predRAF); predRAF = null; }
+
+  document.getElementById('confidenceBars').innerHTML =
+    '<div style="color:var(--muted);font-size:0.75rem;font-family:var(--mono);text-align:center;padding:20px 0;">Train model to see predictions</div>';
+  document.getElementById('topPred').textContent = '—';
+  document.getElementById('topConf').textContent = '—';
+  document.getElementById('statsCard').style.display = 'none';
+  document.getElementById('downloadBtn').disabled = true;
+  document.getElementById('predictBtn').disabled  = true;
+  document.getElementById('predictBtn').textContent = '◈  START PREDICTING';
+  document.getElementById('predictBtn').style.background = '';
+
+  setStatus('ready', 'Ready — Add Classes');
+  syncSelectAndBars();
+}
+
+/* ─────────────────────────────────────────
+   TFJS-VIS TOGGLE
+───────────────────────────────────────── */
+function toggleVisor() {
+  if (window.tfvis) {
+    if (tfvis.visor().isOpen()) { tfvis.visor().close(); }
+    else { tfvis.visor().open(); }
+  }
+}
+
+/* ─────────────────────────────────────────
+   CHECK WEBGL
+───────────────────────────────────────── */
+function checkWebGL() {
+  const canvas = document.createElement('canvas');
+  const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+  if (!gl) {
+    alert('WebGL is not available in your browser. Performance may be severely degraded.');
+  }
+}
+
+/* ─────────────────────────────────────────
+   INIT
+───────────────────────────────────────── */
+async function init() {
+  checkWebGL();
+
+  // Set preferred backend
+  await tf.setBackend('webgl');
+  await tf.ready();
+  console.log('TF Backend:', tf.getBackend());
+
+  const webcamOk = await initWebcam();
+  if (!webcamOk) return;
+
+  await loadMobileNet();
+
+  // Seed two default classes
+  addClassRow('Class A');
+  addClassRow('Class B');
+}
+
+// Kick off
+init().catch(console.error);
+</script>
+</body>
+</html>
