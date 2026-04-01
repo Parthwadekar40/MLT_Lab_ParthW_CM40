@@ -1,0 +1,1217 @@
+<!-- Open this file in browser and use immediately — no setup required -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NoteMind — AI Notebook</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/universal-sentence-encoder@1.3.3/dist/universal-sentence-encoder.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f0e11;
+    --bg2: #16141a;
+    --bg3: #1e1b24;
+    --bg4: #252230;
+    --border: #2e2a3a;
+    --accent: #c8a96e;
+    --accent2: #9d7fd4;
+    --accent3: #5dbf9e;
+    --text: #e8e3f0;
+    --text2: #a89ec0;
+    --text3: #6b6282;
+    --chat-user: #1e1b2e;
+    --chat-ai: #131120;
+    --radius: 12px;
+    --shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; }
+
+  /* SCROLLBARS */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+  /* LAYOUT */
+  #app { display: grid; grid-template-columns: 260px 1fr 300px; grid-template-rows: 52px 1fr; height: 100vh; gap: 0; }
+
+  /* TOP BAR */
+  #topbar {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 20px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    position: relative; z-index: 10;
+  }
+  .logo { font-family: 'Lora', serif; font-size: 18px; color: var(--accent); font-weight: 600; letter-spacing: -0.5px; }
+  .logo span { color: var(--accent2); }
+  #notebook-tabs { display: flex; gap: 4px; flex: 1; overflow-x: auto; scrollbar-width: none; }
+  #notebook-tabs::-webkit-scrollbar { display: none; }
+  .nb-tab {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 14px; border-radius: 8px; cursor: pointer;
+    font-size: 13px; color: var(--text2); white-space: nowrap;
+    transition: all 0.15s; border: 1px solid transparent;
+  }
+  .nb-tab:hover { background: var(--bg3); color: var(--text); }
+  .nb-tab.active { background: var(--bg4); border-color: var(--border); color: var(--text); }
+  .nb-tab .close-tab { opacity: 0; font-size: 11px; color: var(--text3); padding: 1px 3px; border-radius: 3px; }
+  .nb-tab:hover .close-tab { opacity: 1; }
+  .nb-tab .close-tab:hover { background: var(--bg); color: var(--text); }
+  #add-nb { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; cursor: pointer; color: var(--text3); font-size: 18px; transition: all 0.15s; border: 1px solid var(--border); }
+  #add-nb:hover { background: var(--bg4); color: var(--accent); }
+  #model-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text3); margin-left: auto; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); }
+  .status-dot.ready { background: var(--accent3); box-shadow: 0 0 6px var(--accent3); }
+  .status-dot.loading { background: var(--accent); animation: pulse 1s infinite; }
+
+  /* LEFT PANEL */
+  #left-panel {
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-header { padding: 16px 16px 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); }
+  #upload-area {
+    margin: 0 12px 12px;
+    border: 1.5px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 16px 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text3);
+    font-size: 13px;
+  }
+  #upload-area:hover, #upload-area.drag-over { border-color: var(--accent); color: var(--accent); background: rgba(200,169,110,0.04); }
+  #upload-area .upload-icon { font-size: 22px; margin-bottom: 4px; }
+  #file-input { display: none; }
+  #doc-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+  .doc-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 10px; border-radius: 9px; cursor: pointer;
+    transition: all 0.15s; margin-bottom: 2px;
+    border: 1px solid transparent;
+  }
+  .doc-item:hover { background: var(--bg3); }
+  .doc-item.active { background: var(--bg4); border-color: var(--border); }
+  .doc-icon { font-size: 16px; flex-shrink: 0; }
+  .doc-info { flex: 1; min-width: 0; }
+  .doc-name { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .doc-meta { font-size: 11px; color: var(--text3); margin-top: 1px; }
+  .doc-del { font-size: 13px; color: var(--text3); opacity: 0; cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: all 0.1s; }
+  .doc-item:hover .doc-del { opacity: 1; }
+  .doc-del:hover { background: rgba(255,80,80,0.15); color: #ff6b6b; }
+  #left-footer { padding: 12px; border-top: 1px solid var(--border); }
+  .action-btn {
+    width: 100%; padding: 8px 12px; border-radius: 9px;
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text2); cursor: pointer; font-size: 13px;
+    font-family: 'DM Sans', sans-serif; transition: all 0.15s;
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  }
+  .action-btn:hover { background: var(--bg4); color: var(--text); border-color: var(--accent2); }
+  .action-btn:last-child { margin-bottom: 0; }
+
+  /* CENTER PANEL */
+  #center-panel { display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+  #chat-area { flex: 1; overflow-y: auto; padding: 24px 28px; display: flex; flex-direction: column; gap: 16px; }
+  .welcome-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 16px; text-align: center; }
+  .welcome-icon { font-size: 48px; opacity: 0.3; }
+  .welcome-title { font-family: 'Lora', serif; font-size: 22px; color: var(--text2); }
+  .welcome-sub { font-size: 13px; color: var(--text3); max-width: 340px; line-height: 1.6; }
+  .suggested-qs { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
+  .sq-chip {
+    padding: 7px 14px; border-radius: 20px;
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text2); cursor: pointer; font-size: 12px;
+    transition: all 0.15s;
+  }
+  .sq-chip:hover { background: var(--bg4); color: var(--accent); border-color: var(--accent); }
+
+  .msg { display: flex; flex-direction: column; gap: 6px; animation: msgIn 0.25s ease; }
+  @keyframes msgIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .msg-user { align-items: flex-end; }
+  .msg-ai { align-items: flex-start; }
+  .msg-bubble {
+    max-width: 78%; padding: 12px 16px; border-radius: 14px;
+    line-height: 1.65; font-size: 14px;
+  }
+  .msg-user .msg-bubble { background: var(--chat-user); border: 1px solid var(--border); border-bottom-right-radius: 4px; color: var(--text); }
+  .msg-ai .msg-bubble { background: var(--chat-ai); border: 1px solid var(--border); border-bottom-left-radius: 4px; color: var(--text); }
+  .msg-bubble h1, .msg-bubble h2, .msg-bubble h3 { font-family: 'Lora', serif; color: var(--accent); margin: 10px 0 6px; font-size: 15px; }
+  .msg-bubble p { margin-bottom: 8px; }
+  .msg-bubble p:last-child { margin-bottom: 0; }
+  .msg-bubble strong { color: var(--accent2); font-weight: 600; }
+  .msg-bubble ul, .msg-bubble ol { padding-left: 18px; margin-bottom: 8px; }
+  .msg-bubble li { margin-bottom: 4px; }
+  .msg-bubble code { background: var(--bg3); padding: 2px 6px; border-radius: 4px; font-size: 12px; color: var(--accent3); }
+  .msg-label { font-size: 11px; color: var(--text3); padding: 0 4px; }
+  .citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .cite-chip {
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 10px; background: var(--bg3);
+    border: 1px solid var(--border); border-radius: 20px;
+    font-size: 11px; color: var(--accent2); cursor: pointer; transition: all 0.15s;
+  }
+  .cite-chip:hover { background: var(--bg4); border-color: var(--accent2); }
+  .cite-num { background: var(--accent2); color: var(--bg); width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; }
+
+  .thinking-msg .msg-bubble { opacity: 0.7; }
+  .thinking-dots span { display: inline-block; animation: blink 1.2s infinite; }
+  .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%,80%,100% { opacity: 0.2; } 40% { opacity: 1; } }
+
+  #chat-input-area {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--bg2);
+  }
+  #chat-form { display: flex; gap: 10px; align-items: flex-end; }
+  #chat-input {
+    flex: 1; background: var(--bg3); border: 1.5px solid var(--border);
+    border-radius: 12px; padding: 12px 16px; color: var(--text);
+    font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none;
+    resize: none; max-height: 120px; min-height: 44px; overflow-y: auto;
+    transition: border-color 0.15s; line-height: 1.5;
+  }
+  #chat-input:focus { border-color: var(--accent); }
+  #chat-input::placeholder { color: var(--text3); }
+  #send-btn {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: var(--accent); border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--bg); font-size: 18px; transition: all 0.15s; flex-shrink: 0;
+  }
+  #send-btn:hover { background: #d4b87a; transform: scale(1.04); }
+  #send-btn:disabled { background: var(--bg4); color: var(--text3); cursor: not-allowed; transform: none; }
+
+  /* RIGHT PANEL */
+  #right-panel {
+    background: var(--bg2); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .right-tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .r-tab {
+    flex: 1; padding: 12px 6px; text-align: center;
+    font-size: 12px; color: var(--text3); cursor: pointer;
+    border-bottom: 2px solid transparent; transition: all 0.15s;
+  }
+  .r-tab:hover { color: var(--text2); }
+  .r-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .r-content { flex: 1; overflow-y: auto; padding: 14px; display: none; flex-direction: column; gap: 8px; }
+  .r-content.active { display: flex; }
+  .note-card {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 14px; font-size: 13px; line-height: 1.6; color: var(--text2);
+  }
+  .note-card h4 { color: var(--accent); font-size: 13px; margin-bottom: 6px; font-family: 'Lora', serif; font-style: italic; }
+  .note-card ul { padding-left: 16px; }
+  .note-card li { margin-bottom: 4px; color: var(--text2); }
+  .note-card p { color: var(--text2); }
+  .note-card strong { color: var(--text); }
+  .gen-btn {
+    padding: 9px 14px; border-radius: 9px; cursor: pointer;
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text2); font-size: 13px;
+    font-family: 'DM Sans', sans-serif; transition: all 0.15s;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .gen-btn:hover { background: var(--bg4); color: var(--text); border-color: var(--accent2); }
+  .source-chunk {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 12px; font-size: 12px; line-height: 1.6; color: var(--text2);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .source-chunk:hover { border-color: var(--accent2); }
+  .source-chunk .chunk-header { color: var(--accent2); font-size: 11px; font-weight: 600; margin-bottom: 4px; }
+  .source-chunk .chunk-text { color: var(--text3); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .source-chunk.highlighted { border-color: var(--accent); background: rgba(200,169,110,0.06); }
+  .source-chunk .chunk-text.highlighted { color: var(--text); }
+  .empty-state { text-align: center; color: var(--text3); font-size: 13px; padding: 30px 16px; }
+
+  /* MODAL */
+  #modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6); z-index: 100;
+    align-items: center; justify-content: center; backdrop-filter: blur(4px);
+  }
+  #modal-overlay.open { display: flex; }
+  #modal {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 16px;
+    padding: 24px; max-width: 560px; width: 90%; max-height: 80vh;
+    overflow-y: auto; box-shadow: var(--shadow);
+    animation: modalIn 0.2s ease;
+  }
+  @keyframes modalIn { from { opacity:0; transform: scale(0.95); } to { opacity:1; transform: none; } }
+  #modal h3 { font-family: 'Lora', serif; color: var(--accent); margin-bottom: 14px; font-size: 17px; }
+  #modal .chunk-text { font-size: 13px; color: var(--text2); line-height: 1.7; white-space: pre-wrap; }
+  #modal .meta { font-size: 11px; color: var(--text3); margin-bottom: 12px; }
+  #modal-close { position: absolute; top: 16px; right: 16px; cursor: pointer; color: var(--text3); font-size: 18px; }
+  #modal { position: relative; }
+
+  /* LOADING OVERLAY */
+  #loading-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(15,14,17,0.85); z-index: 200;
+    align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+    backdrop-filter: blur(6px);
+  }
+  #loading-overlay.open { display: flex; }
+  .spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading-text { color: var(--text2); font-size: 14px; }
+
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* TOAST */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+    background: var(--bg4); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 20px; font-size: 13px; color: var(--text);
+    transition: transform 0.3s ease; z-index: 300; pointer-events: none;
+    box-shadow: var(--shadow);
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+
+  .progress-bar { height: 2px; background: var(--bg4); border-radius: 1px; overflow: hidden; margin-top: 6px; }
+  .progress-fill { height: 100%; background: var(--accent); transition: width 0.3s; width: 0; }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- TOP BAR -->
+  <div id="topbar">
+    <div class="logo">Note<span>Mind</span></div>
+    <div id="notebook-tabs"></div>
+    <div id="add-nb" title="New Notebook">+</div>
+    <div id="model-status">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">Loading AI…</span>
+    </div>
+  </div>
+
+  <!-- LEFT PANEL -->
+  <div id="left-panel">
+    <div class="panel-header">Sources</div>
+    <div id="upload-area" onclick="document.getElementById('file-input').click()">
+      <div class="upload-icon">📄</div>
+      <div>Drop PDF or TXT here</div>
+      <div style="font-size:11px;margin-top:4px;color:var(--text3)">or click to browse</div>
+    </div>
+    <input type="file" id="file-input" accept=".pdf,.txt" multiple>
+    <div id="doc-list"></div>
+    <div id="left-footer">
+      <button class="action-btn" onclick="generateSummary()">📝 Summarize Document</button>
+      <button class="action-btn" onclick="generateKeyPoints()">🔑 Key Points</button>
+      <button class="action-btn" onclick="generateFAQs()">❓ Generate FAQs</button>
+      <button class="action-btn" onclick="generateInsights()">💡 Insights</button>
+    </div>
+  </div>
+
+  <!-- CENTER PANEL -->
+  <div id="center-panel">
+    <div id="chat-area">
+      <div class="welcome-state" id="welcome-state">
+        <div class="welcome-icon">🧠</div>
+        <div class="welcome-title">Your AI Research Notebook</div>
+        <div class="welcome-sub">Upload PDFs or text files to begin. Ask questions, generate summaries, and explore your documents with AI.</div>
+        <div class="suggested-qs" id="suggested-qs"></div>
+      </div>
+    </div>
+    <div id="chat-input-area">
+      <div id="chat-form">
+        <textarea id="chat-input" placeholder="Ask anything about your documents…" rows="1"></textarea>
+        <button id="send-btn" title="Send">➤</button>
+      </div>
+      <div class="progress-bar" id="embed-progress-bar" style="display:none">
+        <div class="progress-fill" id="embed-progress-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div id="right-panel">
+    <div class="right-tabs">
+      <div class="r-tab active" onclick="switchRTab('notes',this)">Notes</div>
+      <div class="r-tab" onclick="switchRTab('sources',this)">Sources</div>
+      <div class="r-tab" onclick="switchRTab('actions',this)">Actions</div>
+    </div>
+    <div class="r-content active" id="rtab-notes"><div class="empty-state">Notes and summaries will appear here</div></div>
+    <div class="r-content" id="rtab-sources"><div class="empty-state">Upload documents to see source chunks</div></div>
+    <div class="r-content" id="rtab-actions">
+      <div style="padding:4px 0">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.08em">Quick Actions</div>
+        <button class="gen-btn" style="width:100%;margin-bottom:6px" onclick="generateSummary()">📝 Full Summary</button>
+        <button class="gen-btn" style="width:100%;margin-bottom:6px" onclick="generateKeyPoints()">🔑 Extract Key Points</button>
+        <button class="gen-btn" style="width:100%;margin-bottom:6px" onclick="generateFAQs()">❓ Auto-generate FAQs</button>
+        <button class="gen-btn" style="width:100%;margin-bottom:6px" onclick="generateInsights()">💡 Deep Insights</button>
+        <button class="gen-btn" style="width:100%;margin-bottom:6px" onclick="generateTimeline()">📅 Timeline / Structure</button>
+        <button class="gen-btn" style="width:100%" onclick="clearChat()">🗑 Clear Chat</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div id="modal-overlay" onclick="closeModal(event)">
+  <div id="modal">
+    <span id="modal-close" onclick="document.getElementById('modal-overlay').classList.remove('open')">✕</span>
+    <h3 id="modal-title"></h3>
+    <div class="meta" id="modal-meta"></div>
+    <div class="chunk-text" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- LOADING OVERLAY -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div id="loading-text">Initializing AI model…</div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" id="toast"></div>
+
+<script>
+// ─── GLOBALS ──────────────────────────────────────────────────────────────────
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+let useModel = null;
+let modelReady = false;
+
+// Notebooks structure
+let notebooks = [{ id: 1, name: 'Notebook 1', docs: [], chatHistory: [], notes: [] }];
+let activeNotebookId = 1;
+let activeDocId = null;
+
+function nb() { return notebooks.find(n => n.id === activeNotebookId); }
+
+// ─── MODEL INIT ───────────────────────────────────────────────────────────────
+async function initModel() {
+  try {
+    setStatus('loading', 'Loading AI model…');
+    useModel = await use.load();
+    modelReady = true;
+    setStatus('ready', 'AI Ready');
+    // Embed any pending docs
+    for (const nb_ of notebooks) {
+      for (const doc of nb_.docs) {
+        if (doc.chunks && doc.chunks.some(c => !c.embedding)) {
+          await embedDoc(doc);
+        }
+      }
+    }
+  } catch(e) {
+    setStatus('error', 'Model failed — fallback mode');
+    console.warn('USE failed, using fallback TF-IDF', e);
+    modelReady = false;
+  }
+}
+
+function setStatus(state, text) {
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+  dot.className = 'status-dot ' + (state === 'ready' ? 'ready' : state === 'loading' ? 'loading' : '');
+  txt.textContent = text;
+}
+
+// ─── TEXT UTILS ───────────────────────────────────────────────────────────────
+function cleanText(text) {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]{3,}/g, '  ')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+function chunkText(text, docName) {
+  const paragraphs = text.split(/\n{2,}/);
+  const chunks = [];
+  let current = '';
+  let chunkId = 0;
+  const TARGET = 400; // words
+
+  for (const para of paragraphs) {
+    const words = para.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) continue;
+    if ((current + ' ' + para).split(/\s+/).length > TARGET && current.length > 0) {
+      chunks.push({ id: chunkId++, docName, content: current.trim(), embedding: null });
+      current = para;
+    } else {
+      current = current ? current + '\n\n' + para : para;
+    }
+  }
+  if (current.trim()) chunks.push({ id: chunkId++, docName, content: current.trim(), embedding: null });
+  return chunks;
+}
+
+// ─── FILE PARSING ─────────────────────────────────────────────────────────────
+async function parsePDF(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let text = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(item => item.str).join(' ');
+    text += pageText + '\n\n';
+  }
+  return text;
+}
+
+async function parseFile(file) {
+  if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+    return await parsePDF(file);
+  } else {
+    return await file.text();
+  }
+}
+
+// ─── EMBEDDINGS ───────────────────────────────────────────────────────────────
+async function embedDoc(doc) {
+  if (!modelReady || !useModel) return;
+  const texts = doc.chunks.map(c => c.content.substring(0, 500));
+  showProgress(true);
+  try {
+    const embeddings = await useModel.embed(texts);
+    const data = await embeddings.array();
+    doc.chunks.forEach((c, i) => { c.embedding = data[i]; });
+    embeddings.dispose();
+  } catch(e) { console.warn('Embedding error', e); }
+  showProgress(false);
+}
+
+function showProgress(show) {
+  document.getElementById('embed-progress-bar').style.display = show ? 'block' : 'none';
+  if (show) {
+    let w = 0;
+    const fill = document.getElementById('embed-progress-fill');
+    fill.style.width = '0%';
+    const iv = setInterval(() => { w = Math.min(w + 3, 90); fill.style.width = w + '%'; if (!show) clearInterval(iv); }, 80);
+  } else {
+    document.getElementById('embed-progress-fill').style.width = '100%';
+    setTimeout(() => { document.getElementById('embed-progress-bar').style.display = 'none'; }, 400);
+  }
+}
+
+function cosineSimilarity(a, b) {
+  let dot = 0, magA = 0, magB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    magA += a[i] * a[i];
+    magB += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(magA) * Math.sqrt(magB) + 1e-10);
+}
+
+// TF-IDF fallback
+function tfidfScore(query, text) {
+  const qWords = new Set(query.toLowerCase().split(/\W+/).filter(w => w.length > 2));
+  const tWords = text.toLowerCase().split(/\W+/).filter(w => w.length > 2);
+  let hits = 0;
+  tWords.forEach(w => { if (qWords.has(w)) hits++; });
+  return hits / (tWords.length + 1);
+}
+
+async function searchRelevantChunks(query, topK = 5) {
+  const allChunks = [];
+  for (const doc of nb().docs) {
+    doc.chunks.forEach(c => allChunks.push(c));
+  }
+  if (allChunks.length === 0) return [];
+
+  if (modelReady && useModel && allChunks[0].embedding) {
+    const qEmbed = await useModel.embed([query]);
+    const qVec = (await qEmbed.array())[0];
+    qEmbed.dispose();
+    const scored = allChunks.map(c => ({ chunk: c, score: c.embedding ? cosineSimilarity(qVec, c.embedding) : 0 }));
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, topK).map(s => s.chunk);
+  } else {
+    // fallback
+    const scored = allChunks.map(c => ({ chunk: c, score: tfidfScore(query, c.content) }));
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, topK).map(s => s.chunk);
+  }
+}
+
+// ─── ANSWER GENERATION ────────────────────────────────────────────────────────
+function generateAnswer(query, chunks) {
+  if (!chunks.length) return "I couldn't find relevant information in your documents. Please upload documents first.";
+
+  const context = chunks.map((c, i) => `[${i+1}] From "${c.docName}":\n${c.content}`).join('\n\n---\n\n');
+  const qLower = query.toLowerCase();
+
+  // Determine intent
+  const isSummary = /summar|overview|about|main|describe|what is/i.test(query);
+  const isKeyword = /keyword|key term|important word/i.test(query);
+  const isList = /list|what are|enumerate|give me|show me/i.test(query);
+  const isHow = /how|explain|describe how/i.test(query);
+  const isWhy = /why|reason|because|cause/i.test(query);
+  const isDefine = /define|what does|meaning of|definition/i.test(query);
+
+  // Extract sentences relevant to query
+  const qWords = new Set(qLower.split(/\W+/).filter(w => w.length > 3));
+  const allSentences = [];
+  chunks.forEach((c, ci) => {
+    const sents = c.content.split(/(?<=[.!?])\s+/);
+    sents.forEach(s => {
+      const words = s.toLowerCase().split(/\W+/).filter(w => w.length > 3);
+      const overlap = words.filter(w => qWords.has(w)).length;
+      allSentences.push({ text: s.trim(), score: overlap / (words.length + 1), chunk: c, ci });
+    });
+  });
+  allSentences.sort((a, b) => b.score - a.score);
+  const topSents = allSentences.slice(0, 8).map(s => s.text).filter(s => s.length > 30);
+
+  let answer = '';
+
+  if (isSummary) {
+    answer = `## Overview\n\nBased on your documents, here's what I found:\n\n`;
+    answer += chunks.slice(0, 3).map(c => {
+      const firstPara = c.content.split('\n\n')[0];
+      return `**From "${c.docName}":** ${firstPara.substring(0, 300)}${firstPara.length > 300 ? '…' : ''}`;
+    }).join('\n\n');
+  } else if (isList) {
+    answer = `## Relevant Points\n\n`;
+    const points = topSents.slice(0, 6);
+    if (points.length > 0) {
+      answer += points.map(s => `- ${s}`).join('\n');
+    } else {
+      answer += chunks[0].content.substring(0, 400);
+    }
+  } else if (isHow || isWhy) {
+    answer = `## Explanation\n\n`;
+    if (topSents.length > 0) {
+      answer += topSents.slice(0, 5).join(' ');
+    } else {
+      answer += chunks[0].content.substring(0, 500);
+    }
+  } else {
+    // General: compose from most relevant sentences + context
+    if (topSents.length >= 2) {
+      answer += topSents.slice(0, 4).join(' ') + '\n\n';
+    }
+    // Add supporting context from top chunk
+    if (chunks[0] && answer.length < 200) {
+      const extra = chunks[0].content.substring(0, 400);
+      answer += extra;
+    }
+    // Trim and clean
+    answer = answer.trim();
+    if (!answer) answer = chunks[0].content.substring(0, 500);
+  }
+
+  return answer || chunks[0].content.substring(0, 500);
+}
+
+// ─── FILE UPLOAD ──────────────────────────────────────────────────────────────
+async function handleFileUpload(files) {
+  if (!files || !files.length) return;
+  showLoading(true, 'Processing documents…');
+
+  for (const file of files) {
+    try {
+      const text = await parseFile(file);
+      const clean = cleanText(text);
+      if (clean.length < 50) { toast('File appears empty or unreadable'); continue; }
+
+      const chunks = chunkText(clean, file.name);
+      const doc = {
+        id: Date.now() + Math.random(),
+        name: file.name,
+        size: file.size,
+        text: clean,
+        chunks,
+        uploadedAt: new Date()
+      };
+      nb().docs.push(doc);
+      activeDocId = doc.id;
+
+      if (modelReady && useModel) {
+        showLoading(true, `Embedding "${file.name}"…`);
+        await embedDoc(doc);
+      }
+
+      toast(`"${file.name}" added — ${chunks.length} chunks`);
+    } catch(e) {
+      toast('Error reading file: ' + e.message);
+      console.error(e);
+    }
+  }
+
+  showLoading(false);
+  renderDocList();
+  renderSourceChunks();
+  updateSuggestedQuestions();
+  // Auto-summarize first doc
+  if (nb().docs.length === 1) await generateAutoSummary(nb().docs[0]);
+}
+
+// ─── CHAT ─────────────────────────────────────────────────────────────────────
+async function sendMessage(text) {
+  if (!text.trim()) return;
+  if (!nb().docs.length) { toast('Upload documents first!'); return; }
+
+  const chatArea = document.getElementById('chat-area');
+  hideWelcome();
+  appendMessage('user', text);
+  nb().chatHistory.push({ role: 'user', content: text });
+
+  const thinkingId = appendThinking();
+  document.getElementById('send-btn').disabled = true;
+
+  try {
+    const relevant = await searchRelevantChunks(text, 5);
+    await new Promise(r => setTimeout(r, 300)); // slight delay for UX
+    const answer = generateAnswer(text, relevant);
+    removeThinking(thinkingId);
+    appendMessage('ai', answer, relevant);
+    nb().chatHistory.push({ role: 'ai', content: answer });
+    highlightSourceChunks(relevant);
+  } catch(e) {
+    removeThinking(thinkingId);
+    appendMessage('ai', 'Something went wrong: ' + e.message);
+  }
+  document.getElementById('send-btn').disabled = false;
+  chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+function appendMessage(role, content, citations = []) {
+  const chatArea = document.getElementById('chat-area');
+  const div = document.createElement('div');
+  div.className = `msg msg-${role}`;
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = role === 'user' ? 'You' : 'NoteMind AI';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+
+  if (role === 'ai') {
+    bubble.innerHTML = marked.parse(content);
+  } else {
+    bubble.textContent = content;
+  }
+
+  div.appendChild(label);
+  div.appendChild(bubble);
+
+  if (role === 'ai' && citations.length > 0) {
+    const citDiv = document.createElement('div');
+    citDiv.className = 'citations';
+    citations.forEach((c, i) => {
+      const chip = document.createElement('div');
+      chip.className = 'cite-chip';
+      chip.innerHTML = `<span class="cite-num">${i+1}</span>${shortenName(c.docName)} · §${c.id+1}`;
+      chip.onclick = () => showChunkModal(c);
+      citDiv.appendChild(chip);
+    });
+    div.appendChild(citDiv);
+  }
+
+  chatArea.appendChild(div);
+  chatArea.scrollTop = chatArea.scrollHeight;
+  return div;
+}
+
+function appendThinking() {
+  const chatArea = document.getElementById('chat-area');
+  const id = 'thinking-' + Date.now();
+  const div = document.createElement('div');
+  div.className = 'msg msg-ai thinking-msg';
+  div.id = id;
+  div.innerHTML = `<div class="msg-label">NoteMind AI</div><div class="msg-bubble"><span class="thinking-dots"><span>●</span><span>●</span><span>●</span></span></div>`;
+  chatArea.appendChild(div);
+  chatArea.scrollTop = chatArea.scrollHeight;
+  return id;
+}
+
+function removeThinking(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+function hideWelcome() {
+  const w = document.getElementById('welcome-state');
+  if (w) w.style.display = 'none';
+}
+
+function shortenName(name) {
+  return name.length > 18 ? name.substring(0, 15) + '…' : name;
+}
+
+// ─── NOTES GENERATION ────────────────────────────────────────────────────────
+async function generateAutoSummary(doc) {
+  if (!doc) return;
+  const chunks = doc.chunks.slice(0, 5);
+  const text = chunks.map(c => c.content).join('\n\n');
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.length > 40);
+  const summary = sentences.slice(0, 5).join(' ');
+
+  addNote({
+    title: `📄 Auto Summary — ${shortenName(doc.name)}`,
+    body: summary || text.substring(0, 400)
+  });
+}
+
+async function generateSummary() {
+  const doc = activeDoc();
+  if (!doc) { toast('Select a document first'); return; }
+  const text = doc.text;
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.length > 40);
+  const summary = sentences.slice(0, 7).join(' ');
+  addNote({ title: `📝 Summary — ${shortenName(doc.name)}`, body: summary });
+  toast('Summary generated!');
+  switchRTab('notes', document.querySelector('.r-tab'));
+}
+
+async function generateKeyPoints() {
+  const doc = activeDoc();
+  if (!doc) { toast('Select a document first'); return; }
+  const text = doc.text;
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.length > 50 && s.length < 300);
+  
+  // Score by positional importance + length + caps ratio
+  const scored = sentences.map((s, i) => {
+    let score = 0;
+    if (i < 5) score += 3;
+    const capWords = (s.match(/\b[A-Z][a-z]+/g) || []).length;
+    score += capWords * 0.5;
+    const nums = (s.match(/\d+/g) || []).length;
+    score += nums * 0.8;
+    return { s, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const points = scored.slice(0, 7).map(x => x.s.trim());
+
+  addNote({ title: `🔑 Key Points — ${shortenName(doc.name)}`, body: points, type: 'list' });
+  toast('Key points extracted!');
+  switchRTabByName('notes');
+}
+
+async function generateFAQs() {
+  const doc = activeDoc();
+  if (!doc) { toast('Select a document first'); return; }
+  const text = doc.text;
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.length > 40);
+  
+  // Extract nouns/concepts and turn into questions
+  const faqs = [];
+  const sample = sentences.slice(0, 30);
+  const patterns = [
+    { re: /(\w[\w\s]{3,30}) is ([\w][\w\s,.]{10,80})/, q: (m) => `What is ${m[1]}?`, a: (m) => `${m[1]} is ${m[2]}` },
+    { re: /(\w[\w\s]{3,30}) are ([\w][\w\s,.]{10,80})/, q: (m) => `What are ${m[1]}?`, a: (m) => `${m[1]} are ${m[2]}` },
+    { re: /([\w][\w\s]{3,30}) can ([\w][\w\s,.]{10,80})/, q: (m) => `What can ${m[1]} do?`, a: (m) => `${m[1]} can ${m[2]}` },
+    { re: /([\w][\w\s]{3,30}) was ([\w][\w\s,.]{10,80})/, q: (m) => `What was ${m[1]}?`, a: (m) => `${m[1]} was ${m[2]}` },
+  ];
+
+  for (const s of sample) {
+    for (const p of patterns) {
+      const m = s.match(p.re);
+      if (m && faqs.length < 5) {
+        faqs.push({ q: p.q(m), a: p.a(m) });
+        break;
+      }
+    }
+    if (faqs.length >= 5) break;
+  }
+
+  if (faqs.length === 0) {
+    // Fallback: turn first sentences into questions
+    sample.slice(0, 4).forEach(s => {
+      const words = s.trim().split(/\s+/);
+      if (words.length > 5) {
+        const concept = words.slice(0, 4).join(' ').replace(/[.!?,]$/, '');
+        faqs.push({ q: `What does the document say about "${concept}"?`, a: s });
+      }
+    });
+  }
+
+  const body = faqs.map(f => `**Q: ${f.q}**\nA: ${f.a}`).join('\n\n');
+  addNote({ title: `❓ FAQs — ${shortenName(doc.name)}`, body });
+  toast('FAQs generated!');
+  switchRTabByName('notes');
+}
+
+async function generateInsights() {
+  const doc = activeDoc();
+  if (!doc) { toast('Select a document first'); return; }
+  const text = doc.text;
+  
+  const wordCount = text.split(/\s+/).length;
+  const sentenceCount = text.split(/[.!?]+/).filter(s => s.trim()).length;
+  const avgSentLen = Math.round(wordCount / (sentenceCount || 1));
+  const uniqueWords = new Set(text.toLowerCase().split(/\W+/).filter(w => w.length > 3)).size;
+  
+  const topicWords = extractTopWords(text, 10);
+  
+  const insights = [
+    `Document contains ~${wordCount.toLocaleString()} words across ${sentenceCount} sentences`,
+    `Average sentence length: ${avgSentLen} words`,
+    `Vocabulary richness: ${uniqueWords.toLocaleString()} unique terms`,
+    `Top topics: ${topicWords.slice(0, 6).join(', ')}`,
+    `Estimated reading time: ~${Math.ceil(wordCount / 200)} minutes`,
+    `Chunk coverage: ${doc.chunks.length} searchable segments`
+  ];
+
+  addNote({ title: `💡 Insights — ${shortenName(doc.name)}`, body: insights, type: 'list' });
+  toast('Insights generated!');
+  switchRTabByName('notes');
+}
+
+async function generateTimeline() {
+  const doc = activeDoc();
+  if (!doc) { toast('Select a document first'); return; }
+  const text = doc.text;
+  const yearRe = /\b(1[0-9]{3}|20[0-9]{2})\b/g;
+  const dateRe = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:,\s*\d{4})?\b/g;
+  
+  const yearMatches = [...text.matchAll(yearRe)].map(m => ({ year: m[0], idx: m.index }));
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  
+  const events = [];
+  for (const yMatch of yearMatches.slice(0, 10)) {
+    const nearSent = sentences.find(s => s.includes(yMatch.year));
+    if (nearSent) events.push(`**${yMatch.year}** — ${nearSent.substring(0, 120).trim()}`);
+  }
+  
+  if (events.length === 0) {
+    addNote({ title: `📅 Structure — ${shortenName(doc.name)}`, body: doc.chunks.map((c, i) => `Section ${i+1}: ${c.content.split(/\s+/).slice(0, 12).join(' ')}…`), type: 'list' });
+  } else {
+    addNote({ title: `📅 Timeline — ${shortenName(doc.name)}`, body: events, type: 'list' });
+  }
+  toast('Timeline built!');
+  switchRTabByName('notes');
+}
+
+function extractTopWords(text, n = 10) {
+  const stopWords = new Set('the a an and or but in on at to for of with as is was are were be been being have has had do does did will would could should may might must can this that these those it its from by about into through during before after between against through he she they we you i me him her us them all each'.split(' '));
+  const freq = {};
+  text.toLowerCase().split(/\W+/).forEach(w => {
+    if (w.length > 4 && !stopWords.has(w)) freq[w] = (freq[w] || 0) + 1;
+  });
+  return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, n).map(e => e[0]);
+}
+
+// ─── NOTES UI ─────────────────────────────────────────────────────────────────
+function addNote(note) {
+  nb().notes.push(note);
+  renderNotes();
+}
+
+function renderNotes() {
+  const container = document.getElementById('rtab-notes');
+  container.innerHTML = '';
+  if (!nb().notes.length) {
+    container.innerHTML = '<div class="empty-state">Notes will appear here</div>';
+    return;
+  }
+  nb().notes.slice().reverse().forEach(note => {
+    const card = document.createElement('div');
+    card.className = 'note-card';
+    card.innerHTML = `<h4>${note.title}</h4>`;
+    if (note.type === 'list') {
+      const ul = document.createElement('ul');
+      (note.body instanceof Array ? note.body : [note.body]).forEach(item => {
+        const li = document.createElement('li');
+        li.innerHTML = marked.parse(String(item)).replace(/<\/?p>/g, '');
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
+    } else {
+      const p = document.createElement('div');
+      p.innerHTML = marked.parse(String(note.body));
+      card.appendChild(p);
+    }
+    container.appendChild(card);
+  });
+}
+
+// ─── SOURCE CHUNKS UI ────────────────────────────────────────────────────────
+function renderSourceChunks() {
+  const container = document.getElementById('rtab-sources');
+  container.innerHTML = '';
+  const allChunks = nb().docs.flatMap(d => d.chunks);
+  if (!allChunks.length) {
+    container.innerHTML = '<div class="empty-state">Upload documents to see source chunks</div>';
+    return;
+  }
+  allChunks.slice(0, 30).forEach(c => {
+    const el = document.createElement('div');
+    el.className = 'source-chunk';
+    el.id = `chunk-${c.docName}-${c.id}`;
+    el.innerHTML = `<div class="chunk-header">📄 ${shortenName(c.docName)} · §${c.id+1}</div><div class="chunk-text">${escHtml(c.content.substring(0, 200))}…</div>`;
+    el.onclick = () => showChunkModal(c);
+    container.appendChild(el);
+  });
+}
+
+function highlightSourceChunks(chunks) {
+  // Clear previous
+  document.querySelectorAll('.source-chunk').forEach(el => el.classList.remove('highlighted'));
+  chunks.forEach(c => {
+    const el = document.getElementById(`chunk-${c.docName}-${c.id}`);
+    if (el) {
+      el.classList.add('highlighted');
+      el.querySelector('.chunk-text').classList.add('highlighted');
+    }
+  });
+  // Switch to sources tab
+  switchRTabByName('sources');
+  setTimeout(() => switchRTabByName('notes'), 1200); // switch back
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── MODAL ────────────────────────────────────────────────────────────────────
+function showChunkModal(chunk) {
+  document.getElementById('modal-title').textContent = `Source: ${chunk.docName}`;
+  document.getElementById('modal-meta').textContent = `Section ${chunk.id + 1} of "${chunk.docName}"`;
+  document.getElementById('modal-body').textContent = chunk.content;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal(e) {
+  if (e.target === document.getElementById('modal-overlay')) {
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+}
+
+// ─── DOC LIST ─────────────────────────────────────────────────────────────────
+function renderDocList() {
+  const list = document.getElementById('doc-list');
+  list.innerHTML = '';
+  nb().docs.forEach(doc => {
+    const item = document.createElement('div');
+    item.className = 'doc-item' + (doc.id === activeDocId ? ' active' : '');
+    const icon = doc.name.endsWith('.pdf') ? '📕' : '📄';
+    const size = formatSize(doc.size);
+    item.innerHTML = `
+      <span class="doc-icon">${icon}</span>
+      <div class="doc-info">
+        <div class="doc-name" title="${escHtml(doc.name)}">${escHtml(doc.name)}</div>
+        <div class="doc-meta">${size} · ${doc.chunks.length} chunks</div>
+      </div>
+      <span class="doc-del" title="Remove">✕</span>
+    `;
+    item.querySelector('.doc-del').onclick = (e) => { e.stopPropagation(); deleteDoc(doc.id); };
+    item.onclick = () => { activeDocId = doc.id; renderDocList(); };
+    list.appendChild(item);
+  });
+}
+
+function deleteDoc(docId) {
+  nb().docs = nb().docs.filter(d => d.id !== docId);
+  if (activeDocId === docId) activeDocId = nb().docs[0]?.id || null;
+  renderDocList();
+  renderSourceChunks();
+  toast('Document removed');
+}
+
+function activeDoc() {
+  return nb().docs.find(d => d.id === activeDocId) || nb().docs[0] || null;
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return bytes + 'B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + 'KB';
+  return (bytes/1024/1024).toFixed(1) + 'MB';
+}
+
+// ─── NOTEBOOKS ────────────────────────────────────────────────────────────────
+function renderNotebookTabs() {
+  const tabs = document.getElementById('notebook-tabs');
+  tabs.innerHTML = '';
+  notebooks.forEach(nb_ => {
+    const tab = document.createElement('div');
+    tab.className = 'nb-tab' + (nb_.id === activeNotebookId ? ' active' : '');
+    tab.innerHTML = `<span>${nb_.name}</span><span class="close-tab" onclick="deleteNotebook(${nb_.id}, event)">✕</span>`;
+    tab.onclick = () => switchNotebook(nb_.id);
+    tabs.appendChild(tab);
+  });
+}
+
+function switchNotebook(id) {
+  activeNotebookId = id;
+  activeDocId = nb().docs[0]?.id || null;
+  renderAll();
+}
+
+function addNotebook() {
+  const id = Date.now();
+  notebooks.push({ id, name: `Notebook ${notebooks.length + 1}`, docs: [], chatHistory: [], notes: [] });
+  switchNotebook(id);
+}
+
+function deleteNotebook(id, e) {
+  e.stopPropagation();
+  if (notebooks.length <= 1) { toast("Can't delete last notebook"); return; }
+  notebooks = notebooks.filter(n => n.id !== id);
+  if (activeNotebookId === id) switchNotebook(notebooks[0].id);
+  else renderNotebookTabs();
+}
+
+// ─── RIGHT PANEL TABS ─────────────────────────────────────────────────────────
+function switchRTab(name, el) {
+  document.querySelectorAll('.r-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.r-content').forEach(t => t.classList.remove('active'));
+  const tabs = document.querySelectorAll('.r-tab');
+  const contents = ['notes','sources','actions'];
+  const idx = contents.indexOf(name);
+  if (idx >= 0) {
+    tabs[idx].classList.add('active');
+    document.getElementById('rtab-' + name).classList.add('active');
+  }
+}
+
+function switchRTabByName(name) {
+  switchRTab(name, null);
+}
+
+// ─── CHAT CLEAR ──────────────────────────────────────────────────────────────
+function clearChat() {
+  nb().chatHistory = [];
+  const chatArea = document.getElementById('chat-area');
+  chatArea.innerHTML = '';
+  // Re-add welcome
+  const w = document.createElement('div');
+  w.className = 'welcome-state';
+  w.id = 'welcome-state';
+  w.innerHTML = `<div class="welcome-icon">🧠</div><div class="welcome-title">Your AI Research Notebook</div><div class="welcome-sub">Ask a question about your documents.</div><div class="suggested-qs" id="suggested-qs"></div>`;
+  chatArea.appendChild(w);
+  updateSuggestedQuestions();
+  toast('Chat cleared');
+}
+
+// ─── SUGGESTED QUESTIONS ─────────────────────────────────────────────────────
+function updateSuggestedQuestions() {
+  const container = document.getElementById('suggested-qs');
+  if (!container) return;
+  if (!nb().docs.length) return;
+
+  const doc = nb().docs[0];
+  const topWords = extractTopWords(doc.text, 20);
+  const suggestions = [
+    `What is this document about?`,
+    `Summarize the key points`,
+    `What are the main topics?`,
+    topWords[0] ? `Tell me about ${topWords[0]}` : null,
+    topWords[1] ? `Explain ${topWords[1]}` : null,
+    `What are the conclusions?`,
+  ].filter(Boolean).slice(0, 5);
+
+  container.innerHTML = '';
+  suggestions.forEach(q => {
+    const chip = document.createElement('div');
+    chip.className = 'sq-chip';
+    chip.textContent = q;
+    chip.onclick = () => {
+      document.getElementById('chat-input').value = q;
+      handleSend();
+    };
+    container.appendChild(chip);
+  });
+}
+
+// ─── RENDER ALL ───────────────────────────────────────────────────────────────
+function renderAll() {
+  renderNotebookTabs();
+  renderDocList();
+  renderSourceChunks();
+  renderNotes();
+  // Re-render chat
+  const chatArea = document.getElementById('chat-area');
+  chatArea.innerHTML = '';
+  if (!nb().chatHistory.length) {
+    const w = document.createElement('div');
+    w.className = 'welcome-state'; w.id = 'welcome-state';
+    w.innerHTML = `<div class="welcome-icon">🧠</div><div class="welcome-title">Your AI Research Notebook</div><div class="welcome-sub">Upload PDFs or text files to begin.</div><div class="suggested-qs" id="suggested-qs"></div>`;
+    chatArea.appendChild(w);
+    updateSuggestedQuestions();
+  } else {
+    // Restore chat
+    nb().chatHistory.forEach(msg => {
+      appendMessage(msg.role, msg.content);
+    });
+  }
+}
+
+// ─── LOADING / TOAST ─────────────────────────────────────────────────────────
+function showLoading(show, text = '') {
+  const el = document.getElementById('loading-overlay');
+  el.classList.toggle('open', show);
+  if (text) document.getElementById('loading-text').textContent = text;
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// ─── EVENT LISTENERS ─────────────────────────────────────────────────────────
+document.getElementById('file-input').addEventListener('change', async e => {
+  await handleFileUpload(e.target.files);
+  e.target.value = '';
+});
+
+const uploadArea = document.getElementById('upload-area');
+uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag-over'));
+uploadArea.addEventListener('drop', async e => {
+  e.preventDefault(); uploadArea.classList.remove('drag-over');
+  await handleFileUpload(e.dataTransfer.files);
+});
+
+document.getElementById('add-nb').addEventListener('click', addNotebook);
+
+async function handleSend() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  input.style.height = 'auto';
+  await sendMessage(text);
+}
+
+document.getElementById('send-btn').addEventListener('click', handleSend);
+document.getElementById('chat-input').addEventListener('keydown', async e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); await handleSend(); }
+});
+document.getElementById('chat-input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+// ─── BOOT ─────────────────────────────────────────────────────────────────────
+(async function boot() {
+  renderAll();
+  showLoading(true, 'Initializing AI model…');
+  try {
+    await initModel();
+  } catch(e) { console.warn('Model init error', e); }
+  showLoading(false);
+  toast('NoteMind ready! Upload documents to start.');
+})();
+</script>
+</body>
+</html>
